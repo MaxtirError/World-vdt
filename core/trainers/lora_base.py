@@ -156,10 +156,9 @@ class Trainer:
         if self.args.model_type == "camerawarp":
             self.dataset = TartanAirCameraWarpDataset(
                 root=self.args.data_root,
-                max_num_frames=self.state.train_frames,
+                num_frames=self.state.train_frames,
                 height=self.state.train_height,
                 width=self.state.train_width,
-                trainer=self,
             )
         else:
             raise ValueError(f"Invalid model type: {self.args.model_type}")

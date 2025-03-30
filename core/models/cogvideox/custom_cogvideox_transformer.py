@@ -11,6 +11,8 @@ from ..utils import zero_module
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.configuration_utils import register_to_config
 import numpy as np
+import torch.nn.functional as F
+from diffusers.models.embeddings import CogVideoXPatchEmbed
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -19,7 +21,7 @@ class CogVideoxWarpOutput(BaseOutput):
     branch_block_samples: Tuple[torch.Tensor]
 
 class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
-    @register_to_config()
+    @register_to_config
     def __init__(self,
         in_channels: int = 16,
         num_attention_heads: int = 30,
@@ -35,14 +37,30 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         self.branch_blocks = nn.ModuleList([])
         for _ in range(len(self.transformer_blocks)):
             self.branch_blocks.append(zero_module(nn.Linear(inner_dim, inner_dim)))
-
-        self.branch_x_embedder = zero_module(torch.nn.Linear(in_channels, inner_dim))
+        
+        # replace the patch embedding layer
+        self.patch_embed = CogVideoXPatchEmbed(
+            patch_size=self.patch_size,
+            in_channels=in_channels * 2 + 1 if in_channels == 16 else in_channels + 1,
+            embed_dim=inner_dim,
+            text_embed_dim=self.text_embed_dim,
+            bias=True,
+            sample_width=self.sample_width,
+            sample_height=self.sample_height,
+            sample_frames=self.sample_frames,
+            temporal_compression_ratio=self.temporal_compression_ratio,
+            max_text_seq_length=self.max_text_seq_length,
+            spatial_interpolation_scale=self.spatial_interpolation_scale,
+            temporal_interpolation_scale=self.temporal_interpolation_scale,
+            use_positional_embeddings=not self.use_rotary_positional_embeddings,
+            use_learned_positional_embeddings=self.use_learned_positional_embeddings,
+        )
         
     @classmethod
     def from_transformer(
         cls,
         transformer,
-        num_layers: int = 4,
+        num_layers: int = 2,
         attention_head_dim: int = 128,
         num_attention_heads: int = 24,
         load_weights_from_transformer=True,
@@ -195,30 +213,27 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
 
 
 class CogVideoXCameraWarpModel(CogVideoXTransformer3DModel):
-    @register_to_config()
+    @register_to_config
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: str, **kwargs):
-        parent_transformer = super().from_pretrained(pretrained_model_name_or_path, **kwargs)
-        transformer = cls(**parent_transformer.config)
-        transformer.load_state_dict(parent_transformer.state_dict())
-        return transformer
-    
+    def from_transformer(cls, transformer):
+        warp_model = cls(**transformer.config)
+        warp_model.load_state_dict(transformer.state_dict())
+        return warp_model
     
     def forward(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         timestep: Union[int, float, torch.LongTensor],
+        camera_hidden_states: torch.Tensor = None,
         timestep_cond: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         branch_block_samples: Optional[torch.Tensor] = None,
         branch_block_masks: Optional[torch.Tensor] = None,
-        self_guidance_hidden_states: Optional[torch.Tensor] = None,
-        self_guidance_masks: Optional[torch.Tensor] = None,
         return_hidden_states: Optional[bool] = False,
         return_dict: bool = True,
     ):
@@ -250,20 +265,25 @@ class CogVideoXCameraWarpModel(CogVideoXTransformer3DModel):
         emb = self.time_embedding(t_emb, timestep_cond)
 
         # 2. Patch embedding
-        if self_guidance_masks is not None:
-            hidden_states, masks = self.patch_embed(encoder_hidden_states, hidden_states, masks=self_guidance_masks)
-            # hidden_states: (B, Len_t + Len_v, C); masks: (B, Len_v, C)
+        hidden_states = self.patch_embed(encoder_hidden_states, hidden_states)
+        if branch_block_masks is not None:
+            # Process mask
+            masks = branch_block_masks.reshape(-1, 1, height, width)
+            masks = F.avg_pool2d(masks, kernel_size=self.patch_size, stride=self.patch_size)
+            masks = masks.view(batch_size, num_frames, *masks.shape[1:])
+            masks = masks.flatten(3).transpose(2, 3)  # [batch, num_frames, height x width, channels]
+            masks = masks.flatten(1, 2)  # [batch, num_frames x height x width, channels]
+            masks = (masks > 0.0).bool()
             masks = masks.repeat(1, 1, int(hidden_states.shape[-1] / masks.shape[-1]))
-        elif branch_block_masks is not None:
-            hidden_states, masks = self.patch_embed(encoder_hidden_states, hidden_states, masks=branch_block_masks)
-            masks = masks.repeat(1, 1, int(hidden_states.shape[-1] / masks.shape[-1]))
-        else:
-            hidden_states = self.patch_embed(encoder_hidden_states, hidden_states)
+            
         hidden_states = self.embedding_dropout(hidden_states)
 
         text_seq_length = encoder_hidden_states.shape[1]
         encoder_hidden_states = hidden_states[:, :text_seq_length]
         hidden_states = hidden_states[:, text_seq_length:]
+        
+        if camera_hidden_states is not None:
+            hidden_states = hidden_states + camera_hidden_states
 
         # 3. Transformer blocks
         hidden_states_list = []
@@ -283,29 +303,16 @@ class CogVideoXCameraWarpModel(CogVideoXTransformer3DModel):
                     encoder_hidden_states,
                     emb,
                     image_rotary_emb,
-                    attention_kwargs,
                     **ckpt_kwargs,
                 )
             else:
-                current_block_kwargs = attention_kwargs.copy() if attention_kwargs else {}
-                if attention_kwargs and "prev_hidden_states" in attention_kwargs:
-                    layer_states = attention_kwargs["prev_hidden_states"].get(i)
-                    if layer_states is not None:
-                        current_block_kwargs["prev_hidden_states"] = layer_states
-                        current_block_kwargs["prev_clip_weight"] = attention_kwargs["prev_clip_weight"]
-                    prev_resample_mask = attention_kwargs.get("prev_resample_mask")
-                    if prev_resample_mask is not None:
-                        current_block_kwargs["prev_resample_mask"] = prev_resample_mask
             
                 hidden_states, encoder_hidden_states = block(
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
                     temb=emb,
                     image_rotary_emb=image_rotary_emb,
-                    attention_kwargs=current_block_kwargs,
                 )
-            if self_guidance_hidden_states is not None:
-                hidden_states = torch.where(masks == False, self_guidance_hidden_states[i], hidden_states)
 
             if branch_block_samples is not None:
                 interval_control = len(self.transformer_blocks) / len(branch_block_samples)

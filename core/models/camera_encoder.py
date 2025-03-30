@@ -48,7 +48,7 @@ class AbsolutePositionEmbedder(nn.Module):
         return embed
 
 class CameraEncoder3D(ModelMixin, ConfigMixin):
-    @register_to_config()
+    @register_to_config
     def __init__(self, 
             resolution : Tuple[int, int],
             pos_emb_dim : int = 144, 
@@ -81,22 +81,25 @@ class CameraEncoder3D(ModelMixin, ConfigMixin):
         
     def forward(self, extrinsics : torch.Tensor, intrinsics : torch.Tensor):
         dtype = extrinsics.dtype
+        H, W = self.resolution
         extrinsics = extrinsics.type(torch.float32)
         intrinsics = intrinsics.type(torch.float32)
-        plucker = get_plucker_ray(extrinsics, intrinsics, H = self.resolution[0], W = self.resolution[1])
+        plucker = get_plucker_ray(extrinsics, intrinsics, H = H, W = W)
+        B, F = plucker.shape[:2]
+        plucker = plucker.reshape(-1, 6)
         x = self.pos_encoding(plucker).to(dtype)
+        x = x.reshape(B, F, H, W, -1)
         
         x = x.permute(0, 4, 1, 2, 3)
         x = self.conv3d(x)
         x = self.bn3d(x)
         x = self.act3d(x)
         x = x.permute(0, 2, 1, 3, 4)
-        B, T, C, H, W = x.shape
-        x = x.reshape(B*T, C, H, W)
-        x = self.conv2d(x)  # => (B*12, 3072, 29,44)
+        B, T = x.shape[:2]
+        x = self.conv2d(x.flatten(0, 1))
         x = self.bn2d(x)
         x = self.act2d(x)
-        x = x.mean(dim=[2,3])  # 全局平均池化 => (B*12, 3072)
+        # [B * T, out_channel, H, W] -> [B, T * H * W, out_channel]
+        x = x.reshape(B, T, *x.shape[1:]).permute(0, 1, 3, 4, 2).flatten(1, 3)
         x = self.proj(x)
-        x = x.reshape(B, T, -1)  # => (B, 12, 3072)
         return x

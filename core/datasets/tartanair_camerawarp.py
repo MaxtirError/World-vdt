@@ -48,7 +48,7 @@ class TartanAirCameraWarpDataset(Dataset):
         '''
         video = imageio.get_reader(str(video_path))
         video = [frame for frame in video.iter_data()]
-        video = torch.tensor(video).permute(0, 3, 1, 2) / 255.0 * 2 - 1.0
+        video = torch.tensor(np.array(video)).permute(0, 3, 1, 2) / 255.0 * 2 - 1.0
         return video.float()
     
     def _load_mask(self, mask_path):
@@ -84,29 +84,29 @@ class TartanAirCameraWarpDataset(Dataset):
         instance_path = self.root / instance
         frames = self._load_video(instance_path / "frames.mp4")
         warp_frames = self._load_video(instance_path / "warp_frames.mp4")
-        mask = self._load_mask(instance_path / "mask.npy")
+        masks = self._load_mask(instance_path / "mask.npy")
         meta = self._load_meta(instance_path / "meta.json")
         intrinsics = torch.tensor(meta["intrinsics"])
         extrinsics = torch.tensor(meta["extrinsics"])
         return {
             "frames": frames,
             "warp_frames": warp_frames,
-            "mask": mask,
+            "masks": masks.unsqueeze(1),
             "intrinsics": intrinsics,
             "extrinsics": extrinsics,
         }
     
     @staticmethod
-    def collacte_fn(batch):
+    def collate_fn(batch):
         frames = torch.stack([sample["frames"] for sample in batch])
         warp_frames = torch.stack([sample["warp_frames"] for sample in batch])
-        mask = torch.stack([sample["mask"] for sample in batch])
+        masks = torch.stack([sample["masks"] for sample in batch])
         intrinsics = torch.stack([sample["intrinsics"] for sample in batch])
         extrinsics = torch.stack([sample["extrinsics"] for sample in batch])
         return {
             "frames": frames,
             "warp_frames": warp_frames,
-            "mask": mask,
+            "masks": masks,
             "intrinsics": intrinsics,
             "extrinsics": extrinsics,
         }

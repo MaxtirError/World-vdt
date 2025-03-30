@@ -578,7 +578,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         image: torch.Tensor,
         prompt_embeds: Optional[torch.FloatTensor] = None,
         warp_frames: Optional[torch.Tensor] = None,
-        mask: Optional[torch.Tensor] = None,
+        masks: Optional[torch.Tensor] = None,
         extrinsics: Optional[torch.Tensor] = None,
         intrinsics: Optional[torch.Tensor] = None,
         height: int = 480,
@@ -730,16 +730,12 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
             
         # Camera conditioning
         if extrinsics is not None and intrinsics is not None:
-            camera_latents = self.components.camera_encoder(extrinsics, intrinsics)
+            camera_hidden_states = self.components.camera_encoder(extrinsics, intrinsics)
         else:
-            camera_latents = 0
-            
-        image_latents = image_latents + camera_latents
-
-        
+            camera_hidden_states = None
         
         mask, masked_video_latents = self.prepare_mask_latents(
-            mask,
+            masks,
             warp_frames,
             batch_size * num_videos_per_prompt,
             height,
@@ -800,6 +796,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
                     image_rotary_emb=image_rotary_emb,
                     attention_kwargs=attention_kwargs,
                     branch_block_masks=mask[:, :, :1, :, :],
+                    camera_hidden_states=camera_hidden_states,
                     return_dict=False,
                 )[0]
                 noise_pred = noise_pred.float()
