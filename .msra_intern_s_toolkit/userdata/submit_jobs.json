@@ -1,0 +1,23 @@
+{
+    "cluster": {
+        "workspace": "",
+        "virtual_cluster": "msrresrchvc",
+        "instance_type": "E4ads_v5",
+        "node_count": 1,
+        "sla_tier": "Basic"
+    },
+    "io": [],
+    "synchronization": {
+        "target": "",
+        "ignore_dir": ""
+    },
+    "environment": {
+        "image": ""
+    },
+    "experiment": {
+        "name": "",
+        "job_name": "",
+        "script": [],
+        "arg_sweep": []
+    }
+}

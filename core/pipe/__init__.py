@@ -1,0 +1,1 @@
+from pipeline_cogvideox_camerawarp import CogVideoXI2VCameraWarpPipeline
