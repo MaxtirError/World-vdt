@@ -97,6 +97,7 @@ class Trainer:
             log_with=report_to,
             kwargs_handlers=[ddp_kwargs, init_process_group_kwargs],
         )
+        print(accelerator.logging_dir)
 
         # Disable AMP for MPS.
         if torch.backends.mps.is_available():
@@ -311,7 +312,12 @@ class Trainer:
         logger.info("Initializing trackers")
 
         tracker_name = self.args.tracker_name or "finetrainers-experiment"
-        self.accelerator.init_trackers(tracker_name, config=self.args.model_dump())
+        # print(self.args.model_dump())
+        valid_config = {
+            k: v for k, v in self.args.model_dump().items()
+            if isinstance(v, (int, float, str, bool, torch.Tensor))
+        }
+        self.accelerator.init_trackers(tracker_name, config=valid_config)
 
     def train(self) -> None:
         logger.info("Starting training")
@@ -369,7 +375,9 @@ class Trainer:
             logger.debug(f"Starting epoch ({epoch + 1}/{self.args.train_epochs})")
 
             self.components.transformer.train()
-            models_to_accumulate = [self.components.transformer]
+            self.components.warp_encoder.train()
+            self.components.camera_encoder.train()
+            models_to_accumulate = [self.components.transformer, self.components.warp_encoder, self.components.camera_encoder]
 
             for step, batch in enumerate(self.data_loader):
                 logger.debug(f"Starting step {step + 1}")
@@ -650,13 +658,13 @@ class Trainer:
                         type(unwrap_model(self.accelerator, self.components.warp_encoder)),
                     ):
                         model = unwrap_model(self.accelerator, model)
-                        model.save_pretrained(output_dir, subfolder="warp_encoder")
+                        model.save_pretrained(Path(output_dir) / "warp_encoder", subfolder="warp_encoder")
                     elif self.components.camera_encoder is not None and isinstance(
                         unwrap_model(self.accelerator, model),
                         type(unwrap_model(self.accelerator, self.components.camera_encoder)),
                     ):
                         model = unwrap_model(self.accelerator, model)
-                        model.save_pretrained(output_dir, subfolder="camera_encoder")
+                        model.save_pretrained(Path(output_dir) / "camera_encoder", subfolder="camera_encoder")
                     else:
                         raise ValueError(f"Unexpected save model: {model.__class__}")
 
@@ -665,49 +673,34 @@ class Trainer:
                         weights.pop()
 
                 self.components.pipeline_cls.save_lora_weights(
-                    output_dir,
+                    Path(output_dir) / "transformer",
                     transformer_lora_layers=transformer_lora_layers_to_save,
                 )
 
         def load_model_hook(models, input_dir):
-            if not self.accelerator.distributed_type == DistributedType.DEEPSPEED:
-                while len(models) > 0:
-                    model = models.pop()
-                    if isinstance(
-                        unwrap_model(self.accelerator, model),
-                        type(unwrap_model(self.accelerator, self.components.transformer)),
-                    ):
-                        transformer_ = unwrap_model(self.accelerator, model)
-                    elif self.components.warp_encoder is not None and isinstance(
-                        unwrap_model(self.accelerator, model),
-                        type(unwrap_model(self.accelerator, self.components.warp_encoder)),
-                    ):
-                        model = unwrap_model(self.accelerator, model)
-                        model.from_pretrained(input_dir, subfolder="warp_encoder")
-                    elif self.components.camera_encoder is not None and isinstance(
-                        unwrap_model(self.accelerator, model),
-                        type(unwrap_model(self.accelerator, self.components.camera_encoder)),
-                    ):
-                        model = unwrap_model(self.accelerator, model)
-                        model.from_pretrained(input_dir, subfolder="camera_encoder")
-                    else:
-                        raise ValueError(f"Unexpected save model: {unwrap_model(self.accelerator, model).__class__}")
-            else:
-                transformer_ = unwrap_model(self.accelerator, self.components.transformer).__class__.from_pretrained(
-                    self.args.model_path, subfolder="transformer"
-                )
-                transformer_.add_adapter(transformer_lora_config)
-                if self.components.warp_encoder is not None:
-                    self.components.warp_encoder = self.components.warp_encoder.__class__.from_pretrained(
-                        self.args.model_path, subfolder="warp_encoder"
-                    )
-                if self.components.camera_encoder is not None:
-                    self.components.camera_encoder = self.components.camera_encoder.__class__.from_pretrained(
-                        self.args.model_path, subfolder="camera_encoder"
-                    )
-                    
+            while len(models) > 0:
+                model = models.pop()
+                if isinstance(
+                    unwrap_model(self.accelerator, model),
+                    type(unwrap_model(self.accelerator, self.components.transformer)),
+                ):
+                    transformer_ = unwrap_model(self.accelerator, model)
+                elif self.components.warp_encoder is not None and isinstance(
+                    unwrap_model(self.accelerator, model),
+                    type(unwrap_model(self.accelerator, self.components.warp_encoder)),
+                ):
+                    model = unwrap_model(self.accelerator, model)
+                    model.from_pretrained(Path(input_dir) / "warp_encoder", subfolder="warp_encoder")
+                elif self.components.camera_encoder is not None and isinstance(
+                    unwrap_model(self.accelerator, model),
+                    type(unwrap_model(self.accelerator, self.components.camera_encoder)),
+                ):
+                    model = unwrap_model(self.accelerator, model)
+                    model.from_pretrained(Path(input_dir) / "camera_encoder", subfolder="camera_encoder")
+                else:
+                    raise ValueError(f"Unexpected save model: {unwrap_model(self.accelerator, model).__class__}")
 
-            lora_state_dict = self.components.pipeline_cls.lora_state_dict(input_dir)
+            lora_state_dict = self.components.pipeline_cls.lora_state_dict(Path(input_dir) / "transformer")
             transformer_state_dict = {
                 f'{k.replace("transformer.", "")}': v
                 for k, v in lora_state_dict.items()

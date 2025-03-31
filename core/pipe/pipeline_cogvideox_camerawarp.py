@@ -707,8 +707,8 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         # at which timestep to set the initial noise (n.b. 50% if strength is 0.5)
         latent_timestep = timesteps[:1].repeat(batch_size * num_videos_per_prompt)
         # create a boolean to check if the strength is set to 1. if so then initialise the latents with pure noise
-
-        warp_frames = warp_frames.to(dtype=torch.float32)
+        dtype = self.vae.dtype
+        warp_frames = warp_frames.to(dtype=dtype, device=device)
         # 5. Prepare latents.
         latent_channels = self.transformer.config.in_channels // 2
         latents, image_latents, noise = self.prepare_latents(
@@ -717,12 +717,12 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
             num_frames,
             height,
             width,
-            prompt_embeds.dtype,
+            dtype,
             device,
             generator,
             latents,
             video=None,
-            image=image,
+            image=image.to(device=device, dtype=dtype),
             timestep=latent_timestep,
             return_noise=True,
             return_video_latents=False,
@@ -730,19 +730,21 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
             
         # Camera conditioning
         if extrinsics is not None and intrinsics is not None:
-            camera_hidden_states = self.components.camera_encoder(extrinsics, intrinsics)
+            camera_hidden_states = self.camera_encoder(extrinsics, intrinsics)
         else:
             camera_hidden_states = None
-        
+            
+        do_classifier_free_guidance = False
         mask, masked_video_latents = self.prepare_mask_latents(
-            masks,
-            warp_frames,
+            masks.permute(0, 2, 1, 3, 4),
+            warp_frames.permute(0, 2, 1, 3, 4),
             batch_size * num_videos_per_prompt,
             height,
             width,
             prompt_embeds.dtype,
             device,
             generator,
+            do_classifier_free_guidance
         )
         mask = mask.permute(0, 2, 1, 3, 4).repeat(1, 1, latent_channels, 1, 1)
 
@@ -758,7 +760,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
     
         # 8. Denoising loop
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
-        do_classifier_free_guidance = 0.0
+
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             # for DPM-solver++
             old_pred_original_sample = None
@@ -777,7 +779,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
                 latent_branch_input = torch.cat([masked_video_latents, mask[:, :, :1, :, :]], dim=-3)
 
                 
-                branch_block_samples = self.branch(
+                branch_block_samples = self.warp_encoder(
                     hidden_states=latent_video_input,
                     encoder_hidden_states=prompt_embeds,
                     branch_cond=latent_branch_input,
@@ -840,6 +842,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
 
         if not output_type == "latent":
             video = self.decode_latents(latents)
+            print("video shape", video.shape)
             video = self.video_processor.postprocess_video(video=video, output_type=output_type)
         else:
             video = latents

@@ -121,7 +121,6 @@ class CogVideoXI2VLoraTrainer(Trainer):
         if random.random() < self.args.noised_image_dropout:
             image_latents = torch.zeros_like(image_latents)
 
-        print(image_latents.shape, latent.shape)
         # camera condition
         if random.random() < self.args.camera_condition_dropout:
             camera_hidden_states = self.components.camera_encoder(batch["extrinsics"], batch["intrinsics"])
@@ -220,7 +219,7 @@ class CogVideoXI2VLoraTrainer(Trainer):
     
     @override
     def get_validation_data(self):
-        num_validation_samples = 4
+        num_validation_samples = 1
         train_dataset = copy.deepcopy(self.dataset)
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
@@ -255,13 +254,12 @@ class CogVideoXI2VLoraTrainer(Trainer):
             masks=eval_data["masks"],
             generator=self.state.generator,
         ).frames[0]
-        video_gt = pipe.video_processor.postprocess_video(eval_data['frames'])
-        video_warp = pipe.video_processor.postprocess_video(eval_data['warp_frames'])
-        
+        video_gt = pipe.video_processor.postprocess_video(eval_data['frames'].permute(0, 2, 1, 3, 4), output_type="pil")[0]
+        video_warp = pipe.video_processor.postprocess_video(eval_data['warp_frames'].permute(0, 2, 1, 3, 4), output_type="pil")[0]
         return  {
-            "video_gt": {"type" : "video", "data": video_gt},
-            "video_warp": {"type" : "video", "data": video_warp},
-            "video_generate": {"type" : "video", "data": video_generate},
+            "video_gt": {"type" : "video", "value": video_gt},
+            "video_warp": {"type" : "video", "value": video_warp},
+            "video_generate": {"type" : "video", "value": video_generate},
         }
     
     def prepare_rotary_positional_embeddings(
