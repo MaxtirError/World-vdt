@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 from pydantic import BaseModel
@@ -20,6 +20,6 @@ class State(BaseModel):
     num_update_steps_per_epoch: int = 0
     total_batch_size_count: int = 0
 
-    generator: torch.Generator | None = None
+    generator: Optional[torch.Generator] = None
 
     using_deepspeed: bool = False
