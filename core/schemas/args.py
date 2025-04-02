@@ -78,15 +78,19 @@ class Args(BaseModel):
     validation_steps: int | None  # if set, should be a multiple of checkpointing_steps
     gen_fps: int = 15
     
-    ######## Loss weight ########
+    ########## Loss weight ##########
     loss_warp: float = 1.0
     
-    ######## Warp Encoder ########
+    ########## Warp Encoder ##########
     warp_num_layers: int = 2
     
-    ######## Transformer parameters ########
+    ########## Transformer parameters ##########
     noised_image_dropout: float = 0.1
     camera_condition_dropout: float = 0.1
+    
+    ########## Logging ############
+    i_log: int = 10
+    i_print: int = 10
 
     #### deprecated args: gen_video_resolution
     # 1. If set do_validation, should not be None
@@ -201,6 +205,10 @@ class Args(BaseModel):
         # Transformer parameters
         parser.add_argument("--noised_image_dropout", type=float, default=0.1)
         parser.add_argument("--camera_condition_dropout", type=float, default=0.1)
+        
+        # Logger configuration
+        parser.add_argument("--i_log", type=int, default=10)
+        parser.add_argument("--i_print", type=int, default=10)
 
         args = parser.parse_args()
 

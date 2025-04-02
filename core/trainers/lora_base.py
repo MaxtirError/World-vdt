@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Tuple
 import diffusers
 import torch
 import transformers
-import wandb
 from accelerate.accelerator import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import (
@@ -25,12 +24,12 @@ from diffusers.utils.export_utils import export_to_video
 from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
-import copy
+import numpy as np
 
 from core.constants import LOG_LEVEL, LOG_NAME
 from core.datasets import TartanAirCameraWarpDataset
 from core.schemas import Args, Components, State
+import time
 from core.utils import (
     cast_training_params,
     free_memory,
@@ -42,7 +41,7 @@ from core.utils import (
     unload_model,
     unwrap_model,
 )
-
+from core.utils.general_utils import *
 
 logger = get_logger(LOG_NAME, LOG_LEVEL)
 
@@ -51,7 +50,6 @@ _DTYPE_MAP = {
     "fp16": torch.float16,  # FP16 is Only Support for CogVideoX-2B
     "bf16": torch.bfloat16,
 }
-
 
 class Trainer:
     # If set, should be a list of components to unload (refer to `Components``)
@@ -149,7 +147,7 @@ class Trainer:
             if self.args.enable_tiling:
                 self.components.vae.enable_tiling()
 
-        self.state.transformer_config = self.components.transformer.config
+        self.state.transformer_config = self.components.backbone.transformer.config
 
     def prepare_dataset(self) -> None:
         logger.info("Initializing dataset and dataloader")
@@ -205,45 +203,50 @@ class Trainer:
         for attr_name, component in vars(self.components).items():
             if hasattr(component, "requires_grad_"):
                 component.requires_grad_(False)
+        
+        # enable backbone's gradient except for transformer
+        self.components.backbone.requires_grad_(True)
+        self.components.backbone.transformer.requires_grad_(False)
 
+        # add LoRA to backbone's transformer
         transformer_lora_config = LoraConfig(
             r=self.args.rank,
             lora_alpha=self.args.lora_alpha,
             init_lora_weights=True,
             target_modules=self.args.target_modules,
         )
-        self.components.transformer.add_adapter(transformer_lora_config)
+        self.components.backbone.transformer.add_adapter(transformer_lora_config)
         self.__prepare_saving_loading_hooks(transformer_lora_config)
 
         # Load components needed for training to GPU (except transformer), and cast them to the specified data type
-        ignore_list = ["transformer"] + self.UNLOAD_LIST
+        ignore_list = ["backbone"] + self.UNLOAD_LIST
         self.__move_components_to_device(dtype=weight_dtype, ignore_list=ignore_list)
 
         if self.args.gradient_checkpointing:
-            self.components.transformer.enable_gradient_checkpointing()
+            self.components.backbone.enable_gradient_checkpointing()
+            
+        model_summary = get_model_summary(self.components.backbone)
+        # dump summary to output dir
+        if self.accelerator.is_main_process:
+            summary_path = self.args.output_dir / "model_summary.txt"
+            with open(summary_path, "w") as f:
+                f.write(model_summary)
+        logger.info(f"Model summary:\n{model_summary}")
 
     def prepare_optimizer(self) -> None:
         logger.info("Initializing optimizer and lr scheduler")
 
         # Make sure the trainable params are in float32
-        cast_training_params([self.components.transformer], dtype=torch.float32)
-        if self.components.warp_encoder is not None:
-            cast_training_params([self.components.warp_encoder], dtype=torch.float32)
-        if self.components.camera_encoder is not None:
-            cast_training_params([self.components.camera_encoder], dtype=torch.float)
+        cast_training_params([self.components.backbone], dtype=torch.float32)
 
-        transformer_parameters = list(filter(lambda p: p.requires_grad, self.components.transformer.parameters()))
-        warp_encoder_parameters = list(filter(lambda p: p.requires_grad, self.components.warp_encoder.parameters()))
-        camera_encoder_parameters = list(filter(lambda p: p.requires_grad, self.components.camera_encoder.parameters()))
-        # For LoRA, we only want to train the LoRA weights
-        trainable_parameters = transformer_parameters + warp_encoder_parameters + camera_encoder_parameters
+        backbone_parameters = list(filter(lambda p: p.requires_grad, self.components.backbone.parameters()))
         parameters_with_lr = {
-            "params": trainable_parameters,
+            "params": backbone_parameters,
             "lr": self.args.learning_rate,
         }
         
         params_to_optimize = [parameters_with_lr]
-        self.state.num_trainable_parameters = sum(p.numel() for p in trainable_parameters)
+        self.state.num_trainable_parameters = sum(p.numel() for p in backbone_parameters)
 
         use_deepspeed_opt = (
             self.accelerator.state.deepspeed_plugin is not None
@@ -296,8 +299,8 @@ class Trainer:
         self.lr_scheduler = lr_scheduler
 
     def prepare_for_training(self) -> None:
-        self.components.transformer, self.components.warp_encoder, self.components.camera_encoder, self.optimizer, self.data_loader, self.lr_scheduler = self.accelerator.prepare(
-            self.components.transformer, self.components.warp_encoder, self.components.camera_encoder, self.optimizer, self.data_loader, self.lr_scheduler
+        self.components.backbone, self.optimizer, self.data_loader, self.lr_scheduler = self.accelerator.prepare(
+            self.components.backbone, self.optimizer, self.data_loader, self.lr_scheduler
         )
 
         # We need to recalculate our total training steps as the size of the training dataloader may have changed.
@@ -313,11 +316,17 @@ class Trainer:
 
         tracker_name = self.args.tracker_name or "finetrainers-experiment"
         # print(self.args.model_dump())
-        valid_config = {
-            k: v for k, v in self.args.model_dump().items()
-            if isinstance(v, (int, float, str, bool, torch.Tensor))
-        }
-        self.accelerator.init_trackers(tracker_name, config=valid_config)
+        # valid_config = {
+        #     k: v for k, v in self.args.model_dump().items()
+        #     if isinstance(v, (int, float, str, bool, torch.Tensor))
+        # }
+        self.accelerator.init_trackers(tracker_name)
+        # dump config to the output dir
+        if self.accelerator.is_main_process:
+            config_path = self.args.output_dir / "config.json"
+            with open(config_path, "w") as f:
+                f.write(self.args.model_dump_json(indent=4))
+                # json.dump(self.args.model_dump_json(), f, indent=4)
 
     def train(self) -> None:
         logger.info("Starting training")
@@ -357,13 +366,6 @@ class Trainer:
         if resume_from_checkpoint_path is not None:
             self.accelerator.load_state(resume_from_checkpoint_path)
 
-        progress_bar = tqdm(
-            range(0, self.args.train_steps),
-            initial=initial_global_step,
-            desc="Training steps",
-            disable=not self.accelerator.is_local_main_process,
-        )
-
         accelerator = self.accelerator
         generator = torch.Generator(device=accelerator.device)
         if self.args.seed is not None:
@@ -374,15 +376,16 @@ class Trainer:
         for epoch in range(first_epoch, self.args.train_epochs):
             logger.debug(f"Starting epoch ({epoch + 1}/{self.args.train_epochs})")
 
-            self.components.transformer.train()
-            self.components.warp_encoder.train()
-            self.components.camera_encoder.train()
-            models_to_accumulate = [self.components.transformer, self.components.warp_encoder, self.components.camera_encoder]
+            self.components.backbone.train()
+            models_to_accumulate = [self.components.backbone]
 
+            log = []
+            time_last_print = 0.0
+            time_elapsed = 0.0
             for step, batch in enumerate(self.data_loader):
                 logger.debug(f"Starting step {step + 1}")
-                logs = {}
-
+                step_log = {}
+                time_start = time.time()
                 with accelerator.accumulate(models_to_accumulate):
                     # These weighting schemes use a uniform timestep sampling and instead post-weight the loss
                     loss = self.compute_loss(batch)
@@ -390,32 +393,32 @@ class Trainer:
 
                     if accelerator.sync_gradients:
                         if accelerator.distributed_type == DistributedType.DEEPSPEED:
-                            grad_norm = self.components.transformer.get_global_grad_norm()
+                            grad_norm = self.components.backbone.get_global_grad_norm()
                             # In some cases the grad norm may not return a float
                             if torch.is_tensor(grad_norm):
                                 grad_norm = grad_norm.item()
                         else:
                             grad_norm = accelerator.clip_grad_norm_(
-                                self.components.transformer.parameters(), self.args.max_grad_norm
+                                self.components.backbone.parameters(), self.args.max_grad_norm
                             )
                             if torch.is_tensor(grad_norm):
                                 grad_norm = grad_norm.item()
 
-                        logs["grad_norm"] = grad_norm
+                        step_log["grad_norm"] = grad_norm
 
                     self.optimizer.step()
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
+                time_end = time.time()
+                time_elapsed += time_end - time_start
 
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if accelerator.sync_gradients:
-                    progress_bar.update(1)
                     global_step += 1
                     self.__maybe_save_checkpoint(global_step)
 
-                logs["loss"] = loss.detach().item()
-                logs["lr"] = self.lr_scheduler.get_last_lr()[0]
-                progress_bar.set_postfix(logs)
+                step_log["loss"] = loss.detach().item()
+                step_log["lr"] = self.lr_scheduler.get_last_lr()[0]
 
                 # Maybe run validation
                 should_run_validation = self.args.do_validation and global_step % self.args.validation_steps == 0
@@ -423,8 +426,48 @@ class Trainer:
                     del loss
                     free_memory()
                     self.validate(global_step)
+                    
+                
+                # Print progress
+                if accelerator.is_main_process and global_step % self.args.i_print == 0:
+                    speed = self.args.i_print / (time_elapsed - time_last_print) * 3600
+                    columns = [
+                        f'Step: {global_step}/{self.args.train_steps} ({global_step / self.args.train_steps * 100:.2f}%)',
+                        f'Elapsed: {time_elapsed / 3600:.2f} h',
+                        f'Speed: {speed:.2f} steps/h',
+                        f'ETA: {(self.args.train_steps - global_step) / speed:.2f} h',
+                    ]
+                    time_last_print = time_elapsed
+                    description = '| '.join([c.ljust(25) for c in columns])
+                    logger.info(description)
 
-                accelerator.log(logs, step=global_step)
+                if accelerator.is_main_process:
+                    log.append((global_step, {}))
+
+                    # Log time
+                    log[-1][1]['time'] = {
+                        'step': time_end - time_start,
+                        'elapsed': time_elapsed,
+                    }
+
+                    # Log losses
+                    if step_log is not None:
+                        log[-1][1].update(step_log)
+
+                if accelerator.is_main_process and global_step % self.args.i_log == 0:
+                    ## save to log file
+                    log_str = '\n'.join([
+                        f'{step}: {json.dumps(log)}' for step, log in log
+                    ])
+                    with open(self.args.output_dir / "logs.txt", "a+") as log_file:
+                        log_file.write(log_str + '\n')
+
+                    # show with mlflow
+                    log_show = [l for _, l in log if not dict_any(l, lambda x: np.isnan(x))]
+                    log_show = dict_reduce(log_show, lambda x: np.mean(x))
+                    log_show = dict_flatten(log_show, sep='/')
+                    accelerator.log(log_show, step=global_step)
+                    log = []
 
                 if global_step >= self.args.train_steps:
                     break
@@ -454,9 +497,7 @@ class Trainer:
             logger.warning("No validation samples found. Skipping validation.")
             return
 
-        self.components.transformer.eval()
-        self.components.warp_encoder.eval()
-        self.components.camera_encoder.eval()
+        self.components.backbone.eval()
         torch.set_grad_enabled(False)
 
         memory_statistics = get_memory_statistics()
@@ -469,7 +510,7 @@ class Trainer:
             # Can't using model_cpu_offload in deepspeed,
             # so we need to move all components in pipe to device
             # pipe.to(self.accelerator.device, dtype=self.state.weight_dtype)
-            self.__move_components_to_device(dtype=self.state.weight_dtype, ignore_list=["transformer"])
+            self.__move_components_to_device(dtype=self.state.weight_dtype, ignore_list=["backbone"] + self.UNLOAD_LIST)
         else:
             # if not using deepspeed, use model_cpu_offload to further reduce memory usage
             # Or use pipe.enable_sequential_cpu_offload() to further reduce memory usage
@@ -518,31 +559,9 @@ class Trainer:
                 validation_path.mkdir(parents=True, exist_ok=True)
                 filename = str(validation_path / filename)
 
-                if artifact_type == "image":
-                    logger.debug(f"Saving image to {filename}")
-                    artifact_value.save(filename)
-                    artifact_value = wandb.Image(filename)
-                elif artifact_type == "video":
+                if artifact_type == "video":
                     logger.debug(f"Saving video to {filename}")
                     export_to_video(artifact_value, filename, fps=self.args.gen_fps)
-                    artifact_value = wandb.Video(filename)
-
-                all_processes_artifacts.append(artifact_value)
-
-        all_artifacts = gather_object(all_processes_artifacts)
-
-        if accelerator.is_main_process:
-            tracker_key = "validation"
-            for tracker in accelerator.trackers:
-                if tracker.name == "wandb":
-                    image_artifacts = [artifact for artifact in all_artifacts if isinstance(artifact, wandb.Image)]
-                    video_artifacts = [artifact for artifact in all_artifacts if isinstance(artifact, wandb.Video)]
-                    tracker.log(
-                        {
-                            tracker_key: {"images": image_artifacts, "videos": video_artifacts},
-                        },
-                        step=step,
-                    )
 
         ##########  Clean up  ##########
         if self.state.using_deepspeed:
@@ -554,18 +573,10 @@ class Trainer:
             del pipe
             # Load models except those not needed for training
             self.__move_components_to_device(dtype=self.state.weight_dtype, ignore_list=self.UNLOAD_LIST)
-            self.components.transformer.to(self.accelerator.device, dtype=self.state.weight_dtype)
-            if self.components.warp_encoder is not None:
-                self.components.warp_encoder.to(self.accelerator.device, dtype=self.state.weight_dtype)
-            if self.components.camera_encoder is not None:
-                self.components.camera_encoder.to(self.accelerator.device, dtype=self.state.weight_dtype)
+            self.components.backbone.to(self.accelerator.device, dtype=self.state.weight_dtype)
 
             # Change trainable weights back to fp32 to keep with dtype after prepare the model
-            cast_training_params([self.components.transformer], dtype=torch.float32)
-            if self.components.warp_encoder is not None:
-                cast_training_params([self.components.warp_encoder], dtype=torch.float32)
-            if self.components.camera_encoder is not None:
-                cast_training_params([self.components.camera_encoder], dtype=torch.float32)
+            cast_training_params([self.components.backbone], dtype=torch.float32)
 
         free_memory()
         accelerator.wait_for_everyone()
@@ -576,9 +587,7 @@ class Trainer:
         torch.cuda.reset_peak_memory_stats(accelerator.device)
 
         torch.set_grad_enabled(True)
-        self.components.transformer.train()
-        self.components.warp_encoder.train()
-        self.components.camera_encoder.train()
+        self.components.backbone.train()
 
     def fit(self):
         self.check_setting()
@@ -644,27 +653,13 @@ class Trainer:
         # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
         def save_model_hook(models, weights, output_dir):
             if self.accelerator.is_main_process:
-                transformer_lora_layers_to_save = None
-
                 for model in models:
                     if isinstance(
                         unwrap_model(self.accelerator, model),
-                        type(unwrap_model(self.accelerator, self.components.transformer)),
+                        type(unwrap_model(self.accelerator, self.components.backbone)),
                     ):
                         model = unwrap_model(self.accelerator, model)
-                        transformer_lora_layers_to_save = get_peft_model_state_dict(model)
-                    elif self.components.warp_encoder is not None and isinstance(
-                        unwrap_model(self.accelerator, model),
-                        type(unwrap_model(self.accelerator, self.components.warp_encoder)),
-                    ):
-                        model = unwrap_model(self.accelerator, model)
-                        model.save_pretrained(Path(output_dir) / "warp_encoder", subfolder="warp_encoder")
-                    elif self.components.camera_encoder is not None and isinstance(
-                        unwrap_model(self.accelerator, model),
-                        type(unwrap_model(self.accelerator, self.components.camera_encoder)),
-                    ):
-                        model = unwrap_model(self.accelerator, model)
-                        model.save_pretrained(Path(output_dir) / "camera_encoder", subfolder="camera_encoder")
+                        model.save_pretrained(output_dir)
                     else:
                         raise ValueError(f"Unexpected save model: {model.__class__}")
 
@@ -672,49 +667,17 @@ class Trainer:
                     if weights:
                         weights.pop()
 
-                self.components.pipeline_cls.save_lora_weights(
-                    Path(output_dir) / "transformer",
-                    transformer_lora_layers=transformer_lora_layers_to_save,
-                )
-
         def load_model_hook(models, input_dir):
             while len(models) > 0:
                 model = models.pop()
                 if isinstance(
                     unwrap_model(self.accelerator, model),
-                    type(unwrap_model(self.accelerator, self.components.transformer)),
-                ):
-                    transformer_ = unwrap_model(self.accelerator, model)
-                elif self.components.warp_encoder is not None and isinstance(
-                    unwrap_model(self.accelerator, model),
-                    type(unwrap_model(self.accelerator, self.components.warp_encoder)),
+                    type(unwrap_model(self.accelerator, self.components.backbone)),
                 ):
                     model = unwrap_model(self.accelerator, model)
-                    model.from_pretrained(Path(input_dir) / "warp_encoder", subfolder="warp_encoder")
-                elif self.components.camera_encoder is not None and isinstance(
-                    unwrap_model(self.accelerator, model),
-                    type(unwrap_model(self.accelerator, self.components.camera_encoder)),
-                ):
-                    model = unwrap_model(self.accelerator, model)
-                    model.from_pretrained(Path(input_dir) / "camera_encoder", subfolder="camera_encoder")
+                    model.from_pretrained(input_dir)
                 else:
                     raise ValueError(f"Unexpected save model: {unwrap_model(self.accelerator, model).__class__}")
-
-            lora_state_dict = self.components.pipeline_cls.lora_state_dict(Path(input_dir) / "transformer")
-            transformer_state_dict = {
-                f'{k.replace("transformer.", "")}': v
-                for k, v in lora_state_dict.items()
-                if k.startswith("transformer.")
-            }
-            incompatible_keys = set_peft_model_state_dict(transformer_, transformer_state_dict, adapter_name="default")
-            if incompatible_keys is not None:
-                # check only for unexpected keys
-                unexpected_keys = getattr(incompatible_keys, "unexpected_keys", None)
-                if unexpected_keys:
-                    logger.warning(
-                        f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
-                        f" {unexpected_keys}. "
-                    )
 
         self.accelerator.register_save_state_pre_hook(save_model_hook)
         self.accelerator.register_load_state_pre_hook(load_model_hook)

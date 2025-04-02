@@ -1,10 +1,10 @@
 {
     "cluster": {
-        "workspace": "",
-        "virtual_cluster": "msrresrchvc",
-        "instance_type": "E4ads_v5",
+        "workspace": "azmlws2igshare",
+        "virtual_cluster": "msroctovc",
+        "instance_type": "ND96rs_v4",
         "node_count": 1,
-        "sla_tier": "Basic"
+        "sla_tier": "Premium"
     },
     "io": [],
     "synchronization": {

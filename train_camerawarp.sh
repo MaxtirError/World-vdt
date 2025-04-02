@@ -3,6 +3,9 @@
 # Prevent tokenizer parallelism issues
 export TOKENIZERS_PARALLELISM=false
 
+OUTPUT_DIR=$1
+DATA_ROOT=$2
+
 # Model Configuration
 MODEL_ARGS=(
     --model_path "THUDM/CogVideoX-5b-I2V"
@@ -13,13 +16,13 @@ MODEL_ARGS=(
 
 # Output Configuration
 OUTPUT_ARGS=(
-    --output_dir "./debugs/camerawarp"
+    --output_dir "$OUTPUT_DIR"
     --report_to "tensorboard"
 )
 
 # Data Configuration
 DATA_ARGS=(
-    --data_root "/home/t-zelonglv/data/TartanAir_Warp"
+    --data_root ${DATA_ROOT}
     --train_resolution "49x480x720"  # (frames x height x width), frames should be 8N+1
 )
 
@@ -41,23 +44,25 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 50 # save checkpoint every x steps
+    --checkpointing_steps 200 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
 )
 
 # Validation Configuration
 VALIDATION_ARGS=(
     --do_validation true  # ["true", "false"]
-    --validation_steps 50  # should be multiple of checkpointing_steps
+    --validation_steps 500  # should be multiple of checkpointing_steps
     --gen_fps 16
 )
 
 # Combine all arguments and launch training
-accelerate launch train.py \
+accelerate launch --config_file accelerate_config_a100x8.yaml train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
     "${TRAIN_ARGS[@]}" \
     "${SYSTEM_ARGS[@]}" \
     "${CHECKPOINT_ARGS[@]}" \
-    "${VALIDATION_ARGS[@]}"
+    "${VALIDATION_ARGS[@]}" \
+    --i_log 50 \
+    --i_print 50

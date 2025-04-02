@@ -21,12 +21,9 @@ class Components(BaseModel):
     vae: Any = None
 
     # Denoiser
-    transformer: Any = None
+    backbone : Any = None
     unet: Any = None
 
     # Scheduler
     scheduler: Any = None
     
-    # Conditionencoder
-    warp_encoder : Any = None
-    camera_encoder : Any = None

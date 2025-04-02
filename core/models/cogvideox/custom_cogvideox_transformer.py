@@ -212,7 +212,7 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         )
 
 
-class CogVideoXCameraWarpModel(CogVideoXTransformer3DModel):
+class CogVideoXCameraWarpTransformer(CogVideoXTransformer3DModel):
     @register_to_config
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

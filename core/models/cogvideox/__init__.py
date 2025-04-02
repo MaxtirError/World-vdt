@@ -1,1 +1,1 @@
-from .custom_cogvideox_transformer import CogVideoXCameraWarpModel, CogVideoXWarpEncoder
+from .custom_cogvideox_transformer import CogVideoXCameraWarpTransformer, CogVideoXWarpEncoder

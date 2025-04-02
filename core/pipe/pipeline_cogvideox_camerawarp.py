@@ -26,7 +26,7 @@ from diffusers.image_processor import PipelineImageInput
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from diffusers.loaders import CogVideoXLoraLoaderMixin
 from diffusers.models import AutoencoderKLCogVideoX
-from core.models import CogVideoXCameraWarpModel, CameraEncoder3D, CogVideoXWarpEncoder
+from core.backbones import CogVideoXCameraWarpDiffusion
 from diffusers.models.embeddings import get_3d_rotary_pos_embed
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.schedulers import CogVideoXDDIMScheduler, CogVideoXDPMScheduler
@@ -42,29 +42,6 @@ from diffusers.pipelines.cogvideo.pipeline_output import CogVideoXPipelineOutput
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
-
-EXAMPLE_DOC_STRING = """
-    Examples:
-        ```python
-        >>> import torch
-        >>> from diffusers import CogVideoXPipeline
-        >>> from diffusers.utils import export_to_video
-
-        >>> # Models: "THUDM/CogVideoX-2b" or "THUDM/CogVideoX-5b"
-        >>> pipe = CogVideoXPipeline.from_pretrained("THUDM/CogVideoX-2b", torch_dtype=torch.float16).to("cuda")
-        >>> prompt = (
-        ...     "A panda, dressed in a small, red jacket and a tiny hat, sits on a wooden stool in a serene bamboo forest. "
-        ...     "The panda's fluffy paws strum a miniature acoustic guitar, producing soft, melodic tunes. Nearby, a few other "
-        ...     "pandas gather, watching curiously and some clapping in rhythm. Sunlight filters through the tall bamboo, "
-        ...     "casting a gentle glow on the scene. The panda's face is expressive, showing concentration and joy as it plays. "
-        ...     "The background includes a small, flowing stream and vibrant green foliage, enhancing the peaceful and magical "
-        ...     "atmosphere of this unique musical performance."
-        ... )
-        >>> video = pipe(prompt=prompt, guidance_scale=6, num_inference_steps=50).frames[0]
-        >>> export_to_video(video, "output.mp4", fps=8)
-        ```
-"""
 
 
 # Similar to diffusers.pipelines.hunyuandit.pipeline_hunyuandit.get_resize_crop_region_for_grid
@@ -195,10 +172,8 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         tokenizer: T5Tokenizer,
         text_encoder: T5EncoderModel,
         vae: AutoencoderKLCogVideoX,
-        transformer: CogVideoXCameraWarpModel,
+        backbone: CogVideoXCameraWarpDiffusion,
         scheduler: Union[CogVideoXDDIMScheduler, CogVideoXDPMScheduler],
-        camera_encoder : CameraEncoder3D,
-        warp_encoder : CogVideoXWarpEncoder,
     ):
         super().__init__()
 
@@ -206,10 +181,8 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
             tokenizer=tokenizer, 
             text_encoder=text_encoder, 
             vae=vae, 
-            transformer=transformer, 
+            backbone=backbone, 
             scheduler=scheduler,
-            camera_encoder=camera_encoder,
-            warp_encoder=warp_encoder,
         )
         self.vae_scale_factor_spatial = (
             2 ** (len(self.vae.config.block_out_channels) - 1) if hasattr(self, "vae") and self.vae is not None else 8
@@ -519,14 +492,14 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
     def fuse_qkv_projections(self) -> None:
         r"""Enables fused QKV projections."""
         self.fusing_transformer = True
-        self.transformer.fuse_qkv_projections()
+        self.backbone.transformer.fuse_qkv_projections()
 
     def unfuse_qkv_projections(self) -> None:
         r"""Disable QKV projection fusion if enabled."""
         if not self.fusing_transformer:
             logger.warning("The Transformer was not initially fused for QKV projections. Doing nothing.")
         else:
-            self.transformer.unfuse_qkv_projections()
+            self.backbone.transformer.unfuse_qkv_projections()
             self.fusing_transformer = False
 
     def _prepare_rotary_positional_embeddings(
@@ -536,16 +509,17 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         num_frames: int,
         device: torch.device,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        grid_height = height // (self.vae_scale_factor_spatial * self.transformer.config.patch_size)
-        grid_width = width // (self.vae_scale_factor_spatial * self.transformer.config.patch_size)
-        base_size_width = 720 // (self.vae_scale_factor_spatial * self.transformer.config.patch_size)
-        base_size_height = 480 // (self.vae_scale_factor_spatial * self.transformer.config.patch_size)
+        patch_size = self.backbone.transformer.config.patch_size
+        grid_height = height // (self.vae_scale_factor_spatial * patch_size)
+        grid_width = width // (self.vae_scale_factor_spatial * patch_size)
+        base_size_width = 720 // (self.vae_scale_factor_spatial * patch_size)
+        base_size_height = 480 // (self.vae_scale_factor_spatial * patch_size)
 
         grid_crops_coords = get_resize_crop_region_for_grid(
             (grid_height, grid_width), base_size_width, base_size_height
         )
         freqs_cos, freqs_sin = get_3d_rotary_pos_embed(
-            embed_dim=self.transformer.config.attention_head_dim,
+            embed_dim=self.backbone.transformer.config.attention_head_dim,
             crops_coords=grid_crops_coords,
             grid_size=(grid_height, grid_width),
             temporal_size=num_frames,
@@ -572,7 +546,6 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         return self._interrupt
 
     @torch.no_grad()
-    @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
         self,
         image: torch.Tensor,
@@ -598,8 +571,8 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 226,
-        
-        
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
     ) -> Union[CogVideoXPipelineOutput, Tuple]:
         """
         Function invoked when calling the pipeline for generation.
@@ -686,18 +659,19 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
                 "The number of frames must be less than 49 for now due to static positional embeddings. This will be updated in the future to remove this limitation."
             )
 
+        camera_hidden_states = self.backbone.camera_encoder(extrinsics.to(device=device, dtype=dtype), intrinsics.to(device=device, dtype=dtype))
+    
         if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
-        height = height or self.transformer.config.sample_size * self.vae_scale_factor_spatial
-        width = width or self.transformer.config.sample_size * self.vae_scale_factor_spatial
+        height = height or self.backbone.transformer.config.sample_size * self.vae_scale_factor_spatial
+        width = width or self.backbone.transformer.config.sample_size * self.vae_scale_factor_spatial
         num_videos_per_prompt = 1
 
         self._attention_kwargs = attention_kwargs
         self._interrupt = False
 
         batch_size = image.size(0)
-        device = self._execution_device
 
         # 4. Prepare timesteps
         timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, timesteps)
@@ -707,10 +681,9 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         # at which timestep to set the initial noise (n.b. 50% if strength is 0.5)
         latent_timestep = timesteps[:1].repeat(batch_size * num_videos_per_prompt)
         # create a boolean to check if the strength is set to 1. if so then initialise the latents with pure noise
-        dtype = self.vae.dtype
         warp_frames = warp_frames.to(dtype=dtype, device=device)
         # 5. Prepare latents.
-        latent_channels = self.transformer.config.in_channels // 2
+        latent_channels = self.backbone.transformer.config.in_channels // 2
         latents, image_latents, noise = self.prepare_latents(
             batch_size * num_videos_per_prompt,
             latent_channels,
@@ -728,12 +701,6 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
             return_video_latents=False,
         ) # [B, F, C, H, W]
             
-        # Camera conditioning
-        if extrinsics is not None and intrinsics is not None:
-            camera_hidden_states = self.camera_encoder(extrinsics, intrinsics)
-        else:
-            camera_hidden_states = None
-            
         do_classifier_free_guidance = False
         mask, masked_video_latents = self.prepare_mask_latents(
             masks.permute(0, 2, 1, 3, 4),
@@ -746,7 +713,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
             generator,
             do_classifier_free_guidance
         )
-        mask = mask.permute(0, 2, 1, 3, 4).repeat(1, 1, latent_channels, 1, 1)
+        mask = mask.permute(0, 2, 1, 3, 4)
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
@@ -754,13 +721,13 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         # 7. Create rotary embeds if required
         image_rotary_emb = (
             self._prepare_rotary_positional_embeddings(height, width, latents.size(1), device)
-            if self.transformer.config.use_rotary_positional_embeddings
+            if self.backbone.transformer.config.use_rotary_positional_embeddings
             else None
         )
-    
+        
         # 8. Denoising loop
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
-
+        torch.cuda.empty_cache()
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             # for DPM-solver++
             old_pred_original_sample = None
@@ -777,30 +744,16 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
                 timestep = t.expand(latent_model_input.shape[0])
 
                 latent_branch_input = torch.cat([masked_video_latents, mask[:, :, :1, :, :]], dim=-3)
-
-                
-                branch_block_samples = self.warp_encoder(
-                    hidden_states=latent_video_input,
-                    encoder_hidden_states=prompt_embeds,
-                    branch_cond=latent_branch_input,
-                    timestep=timestep,
+                noise_pred = self.backbone(
+                    noisy_video_latents=latent_video_input,
+                    noisy_model_input=latent_model_input,
+                    timesteps=timestep,
+                    warp_latents=latent_branch_input,
+                    warp_masks=mask,
+                    camera_hidden_states= camera_hidden_states,
+                    prompt_embedding=prompt_embeds,
                     image_rotary_emb=image_rotary_emb,
-                    attention_kwargs=attention_kwargs,
-                    return_dict=False,
-                )[0]
-                branch_block_samples = [block_sample.to(dtype=prompt_embeds.dtype) for block_sample in branch_block_samples]
-
-                noise_pred = self.transformer(
-                    hidden_states=latent_model_input,
-                    encoder_hidden_states=prompt_embeds,
-                    branch_block_samples=branch_block_samples,
-                    timestep=timestep,
-                    image_rotary_emb=image_rotary_emb,
-                    attention_kwargs=attention_kwargs,
-                    branch_block_masks=mask[:, :, :1, :, :],
-                    camera_hidden_states=camera_hidden_states,
-                    return_dict=False,
-                )[0]
+                )
                 noise_pred = noise_pred.float()
 
                 if do_classifier_free_guidance:
@@ -820,9 +773,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
                         **extra_step_kwargs,
                         return_dict=False,
                     )
-                latents = latents.to(prompt_embeds.dtype)
-                
-                latents = latents.to(device)
+                latents = latents.to(device=device, dtype=dtype)
 
                 # call the callback, if provided
                 if callback_on_step_end is not None:

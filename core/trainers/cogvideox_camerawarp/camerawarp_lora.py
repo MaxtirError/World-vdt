@@ -6,7 +6,7 @@ from diffusers import (
     AutoencoderKLCogVideoX,
     CogVideoXDPMScheduler,
 )
-from core.models import CogVideoXCameraWarpModel, CameraEncoder3D, CogVideoXWarpEncoder
+from core.backbones import CogVideoXCameraWarpDiffusion
 from diffusers.models.embeddings import get_3d_rotary_pos_embed
 from PIL import Image
 from numpy import dtype
@@ -39,21 +39,12 @@ class CogVideoXI2VLoraTrainer(Trainer):
 
         components.text_encoder = T5EncoderModel.from_pretrained(model_path, subfolder="text_encoder")
 
-        pretrained_transformer = CogVideoXTransformer3DModel.from_pretrained(model_path, subfolder="transformer")
-        
-        components.transformer = CogVideoXCameraWarpModel.from_transformer(pretrained_transformer)
-        
-        components.warp_encoder = CogVideoXWarpEncoder.from_transformer(
-            pretrained_transformer, self.args.warp_num_layers,
-            attention_head_dim=pretrained_transformer.config.attention_head_dim,
-            num_attention_heads=pretrained_transformer.config.num_attention_heads)
-        
-        del pretrained_transformer
-        
-        inner_dim = components.transformer.config.num_attention_heads * components.transformer.attention_head_dim
-        components.camera_encoder = CameraEncoder3D(
-            resolution=(self.state.train_height, self.state.train_width), 
-            out_channel = inner_dim)
+        components.backbone = CogVideoXCameraWarpDiffusion(
+            model_path=model_path,
+            warp_num_layers=self.args.warp_num_layers,
+            train_height=self.state.train_height,
+            train_width=self.state.train_width
+        )
         
         components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae")
         
@@ -67,10 +58,8 @@ class CogVideoXI2VLoraTrainer(Trainer):
             tokenizer=self.components.tokenizer,
             text_encoder=self.components.text_encoder,
             vae=self.components.vae,
-            transformer=unwrap_model(self.accelerator, self.components.transformer),
+            backbone=unwrap_model(self.accelerator, self.components.backbone),
             scheduler=self.components.scheduler,
-            warp_encoder=unwrap_model(self.accelerator, self.components.warp_encoder),
-            camera_encoder=unwrap_model(self.accelerator, self.components.camera_encoder)
         )
         return pipe
 
@@ -109,8 +98,6 @@ class CogVideoXI2VLoraTrainer(Trainer):
         image_noise_sigma = torch.exp(image_noise_sigma).to(dtype=images.dtype)
         noisy_images = images + torch.randn_like(images) * image_noise_sigma[:, None, None, None, None]
         image_latents = self.encode_video(noisy_images)
-        
-        
         # from [B, C, F, H, W] to [B, F, C, H, W]
         latent = latent.permute(0, 2, 1, 3, 4)
         image_latents = image_latents.permute(0, 2, 1, 3, 4)
@@ -120,23 +107,14 @@ class CogVideoXI2VLoraTrainer(Trainer):
         image_latents = torch.cat([image_latents, latent_padding], dim=1)
         if random.random() < self.args.noised_image_dropout:
             image_latents = torch.zeros_like(image_latents)
-
-        # camera condition
-        if random.random() < self.args.camera_condition_dropout:
-            camera_hidden_states = self.components.camera_encoder(batch["extrinsics"], batch["intrinsics"])
-            # print(image_latents.shape, camera_latents.shape)
-        else:
-            camera_hidden_states = None
-            
-        # add camera_latents to image_latents
-        image_latents = image_latents
         
         # warp condition
         conditioning_latents = self.encode_video(batch["warp_frames"].permute(0, 2, 1, 3, 4))
         conditioning_latents = conditioning_latents.permute(0, 2, 1, 3, 4)
-
         torch.cuda.empty_cache()
-
+        
+        
+        # process mask
         vae_scale_factor_spatial = 2 ** (len(self.components.vae.config.block_out_channels) - 1)
         vae_scale_factor_temporal = self.components.vae.config.temporal_compression_ratio
         
@@ -161,6 +139,7 @@ class CogVideoXI2VLoraTrainer(Trainer):
         )
         timesteps = timesteps.long()
         transformer_config = self.state.transformer_config
+        
         # Prepare rotary embeds
         image_rotary_emb = (
             self.prepare_rotary_positional_embeddings(
@@ -180,28 +159,19 @@ class CogVideoXI2VLoraTrainer(Trainer):
         noisy_video_latents = self.components.scheduler.add_noise(latent, noise, timesteps)
         noisy_model_input = torch.cat([noisy_video_latents, image_latents], dim=2)
 
-
-        # logger.info(f"noisy_model_input.shape: {noisy_model_input.shape}; prompt_embeds.shape: {prompt_embeds.shape}")
-        branch_block_samples = self.components.warp_encoder(
-            hidden_states=noisy_video_latents,
-            encoder_hidden_states=self.prompt_embedding.to(device=self.accelerator.device, dtype=weight_dtype),
-            branch_cond=conditioning_latents,
-            timestep=timesteps,
+        model_output = self.components.backbone(
+            noisy_video_latents=noisy_video_latents,
+            noisy_model_input=noisy_model_input,
+            timesteps=timesteps,
+            warp_latents=conditioning_latents,
+            warp_masks=masks,
+            extrinsics=batch["extrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
+            intrinsics=batch["intrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
+            prompt_embedding=self.prompt_embedding,
             image_rotary_emb=image_rotary_emb,
-            return_dict=False,
-        )[0]
-        branch_block_samples = [block_sample.to(dtype=weight_dtype) for block_sample in branch_block_samples]
-        model_output = self.components.transformer(
-            hidden_states=noisy_model_input,
-            encoder_hidden_states=self.prompt_embedding.to(device=self.accelerator.device, dtype=weight_dtype),
-            timestep=timesteps,
-            image_rotary_emb=image_rotary_emb,
-            return_dict=False,
-            branch_block_samples=branch_block_samples,
-            branch_block_masks=masks,
-            camera_hidden_states=camera_hidden_states,
-        )[0]
-
+            drop_out_camera=random.random() < self.args.camera_condition_dropout,
+        )
+        
         model_pred = self.components.scheduler.get_velocity(model_output, noisy_video_latents, timesteps)
         
         weights = 1 / (1 - self.components.scheduler.alphas_cumprod[timesteps])
@@ -253,6 +223,8 @@ class CogVideoXI2VLoraTrainer(Trainer):
             intrinsics=eval_data["intrinsics"],
             masks=eval_data["masks"],
             generator=self.state.generator,
+            device=self.accelerator.device,
+            dtype=self.state.weight_dtype,
         ).frames[0]
         video_gt = pipe.video_processor.postprocess_video(eval_data['frames'].permute(0, 2, 1, 3, 4), output_type="pil")[0]
         video_warp = pipe.video_processor.postprocess_video(eval_data['warp_frames'].permute(0, 2, 1, 3, 4), output_type="pil")[0]

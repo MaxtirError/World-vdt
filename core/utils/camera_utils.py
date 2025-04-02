@@ -49,7 +49,8 @@ def get_plucker_ray(extrinsics: torch.Tensor, intrinsics: torch.Tensor,
     """
     if uv is None:
         assert H is not None and W is not None
-        uv = utils3d.torch.image_uv(H, W).flatten(0, 1).to(extrinsics)
+        uv = utils3d.torch.image_uv(W, H).flatten(0, 1).to(extrinsics)
+        
         
     uvz = torch.cat([uv, torch.ones_like(uv[..., :1])], dim=-1).to(extrinsics)
     with torch.cuda.amp.autocast(enabled=False):
@@ -61,10 +62,10 @@ def get_plucker_ray(extrinsics: torch.Tensor, intrinsics: torch.Tensor,
     rays_o = inv_extrinsics[..., :3, 3] # B, V, 3                       
     rays_o = rays_o[:, :, None].expand_as(rays_d)  # B, V, 3, HW                
     if raw:
-        return rays_o.reshape(*extrinsics.shape[:2], H, W, 3), rays_d.reshape(*extrinsics.shape[:2], H, W, 3)                                                  
+        return rays_o.reshape(*extrinsics.shape[:2], W, H, 3).transpose(-2, -3), rays_d.reshape(*extrinsics.shape[:2], W, H, 3).transpose(-2, -3)                                                  
     rays_dxo = torch.cross(rays_o, rays_d)
     plucker = torch.cat([rays_dxo, rays_d], dim=-1)
-    return plucker.reshape(*extrinsics.shape[:2], H, W, 6)
+    return plucker.reshape(*extrinsics.shape[:2], W, H, 6).transpose(-2, -3)
 
 def visualize_camera_orbit(extrinsics, save_path):
     fig = plt.figure()
