@@ -16,7 +16,7 @@ class Args(BaseModel):
 
     ########## Output ##########
     output_dir: Path = Path("train_results/{:%Y-%m-%d-%H-%M-%S}".format(datetime.datetime.now()))
-    report_to: Literal["tensorboard", "wandb", "all"] | None = None
+    report_to: Optional[Literal["tensorboard", "wandb", "all"]] = None
     tracker_name: str = "finetrainer-cogvideo"
 
     ########## Data ###########
