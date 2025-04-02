@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import torch
 import copy
@@ -205,7 +205,7 @@ class CogVideoXI2VLoraTrainer(Trainer):
     @override
     def validation_step(
         self, eval_data: Dict[str, Any], pipe: CogVideoXI2VCameraWarpPipeline
-    ) -> List[Tuple[str, Image.Image | List[Image.Image]]]:
+    ) -> List[Tuple[str, Union[Image.Image, List[Image.Image]]]]:
         """
         Return the data that needs to be saved. For videos, the data format is List[PIL],
         and for images, the data format is PIL
