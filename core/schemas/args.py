@@ -2,7 +2,7 @@ import argparse
 import datetime
 import logging
 from pathlib import Path
-from typing import Any, List, Literal, Tuple
+from typing import Any, List, Literal, Tuple, Union, Optional
 
 from pydantic import BaseModel, ValidationInfo, field_validator
 
@@ -23,11 +23,11 @@ class Args(BaseModel):
     data_root: Path
 
     ########## Training #########
-    resume_from_checkpoint: Path | None = None
+    resume_from_checkpoint: Optional[Path] = None
 
-    seed: int | None = None
+    seed: Optional[int] = None
     train_epochs: int
-    train_steps: int | None = None
+    train_steps: Optional[int] = None
     checkpointing_steps: int = 200
     checkpointing_limit: int = 10
 
@@ -75,7 +75,7 @@ class Args(BaseModel):
 
     ########## Validation ##########
     do_validation: bool = False
-    validation_steps: int | None  # if set, should be a multiple of checkpointing_steps
+    validation_steps: Optional[int]  # if set, should be a multiple of checkpointing_steps
     gen_fps: int = 15
     
     ########## Loss weight ##########
