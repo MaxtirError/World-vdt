@@ -9,4 +9,4 @@ SAS_TOKEN=$(tr -d '\n' < "$SAS_FILE" | sed 's/[\"\\]/\\&/g')
 # 你的固定URL（请修改为实际URL）
 BASE_URL="https://igshare.blob.core.windows.net/zelonglv/data/TartanAir_Warp/"
 
-azcopy copy "${BASE_URL}${SAS_TOKEN}" $1 --recursive
+/tmp/azcopy copy "${BASE_URL}${SAS_TOKEN}" $1 --recursive
