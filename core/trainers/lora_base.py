@@ -4,7 +4,7 @@ import logging
 import math
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import diffusers
 import torch
@@ -617,7 +617,7 @@ class Trainer:
     def compute_loss(self, batch) -> torch.Tensor:
         raise NotImplementedError
 
-    def validation_step(self) -> List[Tuple[str, Image.Image | List[Image.Image]]]:
+    def validation_step(self) -> List[Tuple[str, Union[Image.Image, List[Image.Image]]]]:
         raise NotImplementedError
     
     def get_validation_data(self) -> Tuple[Dict[str, Any], int]:
