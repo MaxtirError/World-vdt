@@ -13,8 +13,8 @@ logger = get_logger(LOG_NAME, LOG_LEVEL)
 
 
 def get_latest_ckpt_path_to_resume_from(
-    resume_from_checkpoint: str | None, num_update_steps_per_epoch: int
-) -> Tuple[str | None, int, int, int]:
+    resume_from_checkpoint, num_update_steps_per_epoch: int
+):
     if resume_from_checkpoint is None:
         initial_global_step = 0
         global_step = 0
