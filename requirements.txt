@@ -1,8 +1,9 @@
 diffusers
 accelerate
-transformers
+numpy
 sentencepiece
 imageio
+imageio-ffmpeg
 pydantic
 peft
 pillow
@@ -12,6 +13,9 @@ opencv-python-headless
 torchinfo
 tensorboard
 scipy
+azure-storage-blob
+lpips
+pandas
 psutil
 matplotlib
 git+https://github.com/EasternJournalist/utils3d.git
