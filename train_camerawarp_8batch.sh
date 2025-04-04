@@ -56,7 +56,7 @@ VALIDATION_ARGS=(
 )
 
 # Combine all arguments and launch training
-accelerate launch --accelerate_config_mi300x4.yaml train.py  \
+accelerate launch --config_file accelerate_config_mi300x4.yaml train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
