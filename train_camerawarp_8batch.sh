@@ -30,7 +30,7 @@ DATA_ARGS=(
 TRAIN_ARGS=(
     --train_epochs 10 # number of training epochs
     --seed 42 # random seed
-    --batch_size 4
+    --batch_size 2
     --gradient_accumulation_steps 2
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
 )
@@ -56,7 +56,7 @@ VALIDATION_ARGS=(
 )
 
 # Combine all arguments and launch training
-accelerate launch --num_processes 2 --main_process_port $MASTER_PORT train.py  \
+accelerate launch --config_file accelerate_config_mi300x4.yaml train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
