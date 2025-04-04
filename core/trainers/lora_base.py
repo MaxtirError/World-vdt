@@ -691,4 +691,4 @@ class Trainer:
                     step=global_step,
                     output_dir=self.args.output_dir,
                 )
-                self.accelerator.save_state(save_path, safe_serialization=True)
+                self.accelerator.save_state(save_path)
