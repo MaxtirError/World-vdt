@@ -56,7 +56,7 @@ VALIDATION_ARGS=(
 )
 
 # Combine all arguments and launch training
-accelerate launch --num_proesses 2 --main_process_port $MASTER_PORT train.py  \
+accelerate launch --num_processes 2 --main_process_port $MASTER_PORT train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
