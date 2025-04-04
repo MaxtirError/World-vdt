@@ -56,7 +56,7 @@ VALIDATION_ARGS=(
 )
 
 # Combine all arguments and launch training
-accelerate launch --config accelerate_config_mi300x4 train.py --main_process_port $MASTER_PORT  \
+accelerate launch --config_file accelerate_config_mi300x4 train.py --main_process_port $MASTER_PORT  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
