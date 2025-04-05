@@ -5,7 +5,7 @@ import math
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
-
+import os
 import diffusers
 import torch
 import transformers
@@ -691,4 +691,9 @@ class Trainer:
                     step=global_step,
                     output_dir=self.args.output_dir,
                 )
-                self.accelerator.save_state(save_path)
+                self.accelerator.save_state("./cache/")
+                if self.accelerator.is_main_process:
+                    # for deepspeed
+                    # mv to save_path
+                    os.makedirs(save_path, exist_ok=True)
+                    os.system(f"mv ./cache/* {save_path}")

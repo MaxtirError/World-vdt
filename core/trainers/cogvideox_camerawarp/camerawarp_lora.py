@@ -167,7 +167,7 @@ class CogVideoXI2VLoraTrainer(Trainer):
             warp_masks=masks,
             extrinsics=batch["extrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
             intrinsics=batch["intrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
-            prompt_embedding=self.prompt_embedding,
+            prompt_embedding=self.prompt_embedding.repeat(batch_size, *([1] * (len(self.prompt_embedding.shape) - 1))),
             image_rotary_emb=image_rotary_emb,
             drop_out_camera=random.random() < self.args.camera_condition_dropout,
         )
