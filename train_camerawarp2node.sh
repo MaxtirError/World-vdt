@@ -57,8 +57,7 @@ VALIDATION_ARGS=(
 
 # Combine all arguments and launch training
 accelerate launch \
-    --config_file accelerate_config_a100x4.yaml \ 
-    --num_machines 2 \
+    --config_file accelerate_config_a100x4.yaml --num_machines 2 \
     --machine_rank $NODE_RANK \
     --main_process_ip $MASTER_ADDR \
     --main_process_port $MASTER_PORT \
