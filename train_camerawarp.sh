@@ -31,7 +31,7 @@ TRAIN_ARGS=(
     --train_epochs 10 # number of training epochs
     --seed 42 # random seed
     --batch_size 2
-    --gradient_accumulation_steps 2
+    --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
 )
 
@@ -44,7 +44,7 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 50 # save checkpoint every x steps
+    --checkpointing_steps 500 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
 )
 
@@ -56,7 +56,7 @@ VALIDATION_ARGS=(
 )
 
 # Combine all arguments and launch training
-accelerate launch --config_file accelerate_config_a100x8.yaml train.py  \
+accelerate launch --config_file accelerate_config_a100x4.yaml train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
