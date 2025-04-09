@@ -58,11 +58,11 @@ VALIDATION_ARGS=(
 # Combine all arguments and launch training
 accelerate launch \
     --config_file accelerate_config_a100x4.yaml \ 
-    --num_machines 4 \
+    --num_machines 2 \
     --machine_rank $NODE_RANK \
     --main_process_ip $MASTER_ADDR \
     --main_process_port $MASTER_PORT \
-    --num_processes 16 train.py  \
+    --num_processes 8 train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
