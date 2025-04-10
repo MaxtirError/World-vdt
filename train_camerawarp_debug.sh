@@ -9,7 +9,7 @@ DATA_ROOT=$2
 # Model Configuration
 MODEL_ARGS=(
     --model_path "THUDM/CogVideoX-5b-I2V"
-    --cache_dir "/home/t-zelonglv/.cache/huggingface/hub/"
+    --cache_dir "./cache/hub/"
     --model_name "cogvideox-camerawarp"
     --model_type "camerawarp"
     --training_type "lora"

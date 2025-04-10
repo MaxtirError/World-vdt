@@ -6,3 +6,4 @@ az_scripts.sh
 tmp/
 amlt/
 amlt_try/
+cache/
