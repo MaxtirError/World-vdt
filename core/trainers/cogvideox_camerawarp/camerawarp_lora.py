@@ -35,21 +35,32 @@ class CogVideoXI2VLoraTrainer(Trainer):
         cache_dir = str(self.args.cache_dir)
 
         components.pipeline_cls = CogVideoXI2VCameraWarpPipeline
-
-        components.tokenizer = AutoTokenizer.from_pretrained(model_path, subfolder="tokenizer", cache_dir=cache_dir)
-
-        components.text_encoder = T5EncoderModel.from_pretrained(model_path, subfolder="text_encoder", cache_dir=cache_dir)
+        try:
+            components.tokenizer = AutoTokenizer.from_pretrained(model_path, subfolder="tokenizer", cache_dir=cache_dir)
+        except:
+            components.tokenizer = AutoTokenizer.from_pretrained(model_path, subfolder="tokenizer")
+        
+        try:
+            components.text_encoder = T5EncoderModel.from_pretrained(model_path, subfolder="text_encoder", cache_dir=cache_dir)
+        except:
+            components.text_encoder = T5EncoderModel.from_pretrained(model_path, subfolder="text_encoder")
 
         components.backbone = CogVideoXCameraWarpDiffusion(
             model_path=model_path,
+            cache_dir=cache_dir,
             warp_num_layers=self.args.warp_num_layers,
             train_height=self.state.train_height,
             train_width=self.state.train_width
         )
+        try:
+            components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae", cache_dir=cache_dir)
+        except:
+            components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae")
         
-        components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae", cache_dir=cache_dir)
-        
-        components.scheduler = CogVideoXDPMScheduler.from_pretrained(model_path, subfolder="scheduler", cache_dir=cache_dir)
+        try:
+            components.scheduler = CogVideoXDPMScheduler.from_pretrained(model_path, subfolder="scheduler", cache_dir=cache_dir)
+        except:
+            components.scheduler = CogVideoXDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
 
         return components
 

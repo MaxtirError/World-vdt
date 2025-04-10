@@ -16,13 +16,17 @@ logger = get_logger(LOG_NAME, LOG_LEVEL)
 
 class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
     def __init__(self, model_path: str, 
+            cache_dir : str,
             warp_num_layers: int,
             train_height: int,
             train_width: int):
         super().__init__()
         self.model_path = model_path
         self.warp_num_layers = warp_num_layers
-        pretrained_transformer = CogVideoXTransformer3DModel.from_pretrained(model_path, subfolder="transformer")
+        try:
+            pretrained_transformer = CogVideoXTransformer3DModel.from_pretrained(model_path, subfolder="transformer", cache_dir=cache_dir)
+        except:
+            pretrained_transformer = CogVideoXTransformer3DModel.from_pretrained(model_path, subfolder="transformer")
         self.transformer : CogVideoXCameraWarpTransformer = CogVideoXCameraWarpTransformer.from_transformer(pretrained_transformer)
         
         self.warp_encoder : CogVideoXWarpEncoder = CogVideoXWarpEncoder.from_transformer(
