@@ -9,6 +9,7 @@ DATA_ROOT=$2
 # Model Configuration
 MODEL_ARGS=(
     --model_path "THUDM/CogVideoX-5b-I2V"
+    --cache_dir "/home/t-zelonglv/.cache/huggingface/hub/"
     --model_name "cogvideox-camerawarp"
     --model_type "camerawarp"
     --training_type "lora"
@@ -44,7 +45,7 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 200 # save checkpoint every x steps
+    --checkpointing_steps 500 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
 )
 
@@ -56,12 +57,7 @@ VALIDATION_ARGS=(
 )
 
 # Combine all arguments and launch training
-accelerate launch \
-    --config_file accelerate_config_a100x4.yaml --num_machines 8 \
-    --machine_rank $NODE_RANK \
-    --main_process_ip $MASTER_ADDR \
-    --main_process_port $MASTER_PORT \
-    --num_processes 32 train.py  \
+accelerate launch --config_file accelerate_config_a100x4.yaml train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \

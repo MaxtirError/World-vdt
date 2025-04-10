@@ -5,10 +5,12 @@ export TOKENIZERS_PARALLELISM=false
 
 OUTPUT_DIR=$1
 DATA_ROOT=$2
+CACHE_DIR=$3
 
 # Model Configuration
 MODEL_ARGS=(
     --model_path "THUDM/CogVideoX-5b-I2V"
+    --cache_dir "$CACHE_DIR"
     --model_name "cogvideox-camerawarp"
     --model_type "camerawarp"
     --training_type "lora"
@@ -30,8 +32,8 @@ DATA_ARGS=(
 TRAIN_ARGS=(
     --train_epochs 10 # number of training epochs
     --seed 42 # random seed
-    --batch_size 4
-    --gradient_accumulation_steps 2
+    --batch_size 2
+    --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
 )
 
@@ -44,7 +46,7 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 500 # save checkpoint every x steps
+    --checkpointing_steps 200 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
 )
 
@@ -56,7 +58,13 @@ VALIDATION_ARGS=(
 )
 
 # Combine all arguments and launch training
-accelerate launch --config_file accelerate_config_mi300x4.yaml train.py  \
+accelerate launch \
+    --config_file accelerate_config_base.yaml \
+    --num_machines 8 \
+    --machine_rank $NODE_RANK \
+    --main_process_ip $MASTER_ADDR \
+    --main_process_port $MASTER_PORT \
+    --num_processes 32 train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \

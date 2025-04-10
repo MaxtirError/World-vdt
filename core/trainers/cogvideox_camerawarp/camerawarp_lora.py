@@ -32,12 +32,13 @@ class CogVideoXI2VLoraTrainer(Trainer):
     def load_components(self) -> Dict[str, Any]:
         components = Components()
         model_path = str(self.args.model_path)
+        cache_dir = str(self.args.cache_dir)
 
         components.pipeline_cls = CogVideoXI2VCameraWarpPipeline
 
-        components.tokenizer = AutoTokenizer.from_pretrained(model_path, subfolder="tokenizer")
+        components.tokenizer = AutoTokenizer.from_pretrained(model_path, subfolder="tokenizer", cache_dir=cache_dir)
 
-        components.text_encoder = T5EncoderModel.from_pretrained(model_path, subfolder="text_encoder")
+        components.text_encoder = T5EncoderModel.from_pretrained(model_path, subfolder="text_encoder", cache_dir=cache_dir)
 
         components.backbone = CogVideoXCameraWarpDiffusion(
             model_path=model_path,
@@ -46,9 +47,9 @@ class CogVideoXI2VLoraTrainer(Trainer):
             train_width=self.state.train_width
         )
         
-        components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae")
+        components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae", cache_dir=cache_dir)
         
-        components.scheduler = CogVideoXDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
+        components.scheduler = CogVideoXDPMScheduler.from_pretrained(model_path, subfolder="scheduler", cache_dir=cache_dir)
 
         return components
 
@@ -182,9 +183,10 @@ class CogVideoXI2VLoraTrainer(Trainer):
 
         loss = torch.mean((weights * (model_pred - target) ** 2).reshape(batch_size, -1), dim=1)
         loss = loss.mean()
-        warp_loss = torch.mean((weights * (model_pred*masks - target*masks) ** 2).reshape(batch_size, -1), dim=1)
-        warp_loss = warp_loss.mean()
-        loss = loss + self.args.loss_warp * warp_loss
+        if self.args.loss_warp > 0:
+            warp_loss = torch.mean((weights * (model_pred*masks - target*masks) ** 2).reshape(batch_size, -1), dim=1)
+            warp_loss = warp_loss.mean()
+            loss = loss + self.args.loss_warp * warp_loss
         return loss
     
     @override

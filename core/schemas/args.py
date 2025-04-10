@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationInfo, field_validator
 class Args(BaseModel):
     ########## Model ##########
     model_path: Path
+    cache_dir : Path
     model_name: str
     model_type: Literal["camerawarp"] = "camerawarp"
     training_type: Literal["lora", "sft"] = "lora"
@@ -79,7 +80,7 @@ class Args(BaseModel):
     gen_fps: int = 15
     
     ########## Loss weight ##########
-    loss_warp: float = 1.0
+    loss_warp: float = 0.0
     
     ########## Warp Encoder ##########
     warp_num_layers: int = 2
@@ -140,6 +141,7 @@ class Args(BaseModel):
         parser = argparse.ArgumentParser()
         # Required arguments
         parser.add_argument("--model_path", type=str, required=True)
+        parser.add_argument("--cache_dir", type=str, required=True)
         parser.add_argument("--model_name", type=str, required=True)
         parser.add_argument("--model_type", type=str, required=True)
         parser.add_argument("--training_type", type=str, required=True)
@@ -197,7 +199,7 @@ class Args(BaseModel):
         parser.add_argument("--gen_fps", type=int, default=15)
         
         # Loss weight
-        parser.add_argument("--loss_warp", type=float, default=1.0)
+        parser.add_argument("--loss_warp", type=float, default=0.0)
         
         # Warp Encoder
         parser.add_argument("--warp_num_layers", type=int, default=2)

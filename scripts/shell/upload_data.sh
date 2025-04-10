@@ -7,6 +7,6 @@ SAS_FILE="${SCRIPT_DIR}/sas.txt"
 SAS_TOKEN=$(tr -d '\n' < "$SAS_FILE" | sed 's/[\"\\]/\\&/g')
 
 # 你的固定URL（请修改为实际URL）
-BASE_URL="https://igshare.blob.core.windows.net/zelonglv/data/"
+BASE_URL="https://igshare.blob.core.windows.net/zelonglv/model_cache/"
 
 azcopy copy $1 "${BASE_URL}${SAS_TOKEN}" --recursive
