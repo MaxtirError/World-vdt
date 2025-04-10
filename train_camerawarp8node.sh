@@ -44,7 +44,7 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 100 # save checkpoint every x steps
+    --checkpointing_steps 200 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
 )
 
@@ -57,11 +57,11 @@ VALIDATION_ARGS=(
 
 # Combine all arguments and launch training
 accelerate launch \
-    --config_file accelerate_config_a100x4.yaml --num_machines 2 \
+    --config_file accelerate_config_a100x4.yaml --num_machines 8 \
     --machine_rank $NODE_RANK \
     --main_process_ip $MASTER_ADDR \
     --main_process_port $MASTER_PORT \
-    --num_processes 8 train.py  \
+    --num_processes 32 train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
