@@ -30,7 +30,7 @@ class Args(BaseModel):
     train_epochs: int
     train_steps: Optional[int] = None
     checkpointing_steps: int = 200
-    checkpointing_limit: int = 10
+    checkpointing_limit: Optional[int] = None
 
     batch_size: int
     gradient_accumulation_steps: int = 1
@@ -64,10 +64,11 @@ class Args(BaseModel):
     num_workers: int = 8
     pin_memory: bool = True
 
-    gradient_checkpointing: bool = True
+    gradient_checkpointing: bool = False
     enable_slicing: bool = True
     enable_tiling: bool = True
     nccl_timeout: int = 1800
+    debug: bool = False
 
     ########## Lora ##########
     rank: int = 128
@@ -178,10 +179,11 @@ class Args(BaseModel):
 
         # Model configuration
         parser.add_argument("--mixed_precision", type=str, default="no")
-        parser.add_argument("--gradient_checkpointing", type=bool, default=True)
         parser.add_argument("--enable_slicing", type=bool, default=True)
         parser.add_argument("--enable_tiling", type=bool, default=True)
         parser.add_argument("--nccl_timeout", type=int, default=1800)
+        parser.add_argument("--debug", action="store_true", default=False)
+        parser.add_argument("--gradient_checkpointing", action="store_true", default=False)
 
         # LoRA parameters
         parser.add_argument("--rank", type=int, default=128)
@@ -190,7 +192,7 @@ class Args(BaseModel):
 
         # Checkpointing
         parser.add_argument("--checkpointing_steps", type=int, default=200)
-        parser.add_argument("--checkpointing_limit", type=int, default=10)
+        parser.add_argument("--checkpointing_limit", type=int, default=None)
         parser.add_argument("--resume_from_checkpoint", type=str, default=None)
 
         # Validation

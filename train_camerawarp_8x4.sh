@@ -35,6 +35,7 @@ TRAIN_ARGS=(
     --batch_size 2
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
+    --gradient_checkpointing
 )
 
 # System Configuration
@@ -46,8 +47,8 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 200 # save checkpoint every x steps
-    --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
+    --checkpointing_steps 500 # save checkpoint every x steps
+    --resume_from_checkpoint /mtn/blob/workspace/TartanAirWarp/0410_CameraWarpDiT_a100x32/checkpoint-1000/
 )
 
 # Validation Configuration

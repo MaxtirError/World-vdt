@@ -42,6 +42,7 @@ from core.utils import (
     unwrap_model,
 )
 from core.utils.general_utils import *
+from core.utils.debug_utils import CUDATimer
 
 logger = get_logger(LOG_NAME, LOG_LEVEL)
 
@@ -223,6 +224,8 @@ class Trainer:
         self.__move_components_to_device(dtype=weight_dtype, ignore_list=ignore_list)
 
         if self.args.gradient_checkpointing:
+            if self.args.debug:
+                print("Gradient checkpointing enabled.")
             self.components.backbone.enable_gradient_checkpointing()
             
         model_summary = get_model_summary(self.components.backbone)
@@ -388,8 +391,16 @@ class Trainer:
                 time_start = time.time()
                 with accelerator.accumulate(models_to_accumulate):
                     # These weighting schemes use a uniform timestep sampling and instead post-weight the loss
-                    loss = self.compute_loss(batch)
-                    accelerator.backward(loss)
+                    if self.args.debug:
+                        loss = self.compute_loss_debug(batch)
+                    else:
+                        loss = self.compute_loss(batch)
+
+                    if self.args.debug:
+                        with CUDATimer("backward"):
+                            accelerator.backward(loss)
+                    else:
+                        accelerator.backward(loss)
 
                     if accelerator.sync_gradients:
                         if accelerator.distributed_type == DistributedType.DEEPSPEED:

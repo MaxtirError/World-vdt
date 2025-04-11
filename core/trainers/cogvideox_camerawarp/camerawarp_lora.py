@@ -22,6 +22,7 @@ from core.constants import LOG_LEVEL, LOG_NAME
 from accelerate.logging import get_logger
 from core.trainers.utils import register
 from diffusers.models.transformers.cogvideox_transformer_3d import CogVideoXTransformer3DModel
+from core.utils.debug_utils import CUDATimer
 logger = get_logger(LOG_NAME, LOG_LEVEL)
 
 
@@ -275,6 +276,121 @@ class CogVideoXI2VLoraTrainer(Trainer):
         )
 
         return freqs_cos, freqs_sin
+    
+    @override
+    def compute_loss_debug(self, batch) -> torch.Tensor:
+        with CUDATimer("vae encoding operations"):
+            # model input
+            latent = self.encode_video(batch["frames"].permute(0, 2, 1, 3, 4))
+            weight_dtype = self.state.weight_dtype
+        
+            # image condition
+            images = batch["frames"][:, :1, :, :, :].permute(0, 2, 1, 3, 4)  # [B, C, F, H, W]
+            image_noise_sigma = torch.normal(mean=-3.0, std=0.5, size=(images.size(0),), device=self.accelerator.device)
+            image_noise_sigma = torch.exp(image_noise_sigma).to(dtype=images.dtype)
+            noisy_images = images + torch.randn_like(images) * image_noise_sigma[:, None, None, None, None]
+            image_latents = self.encode_video(noisy_images)
+            # from [B, C, F, H, W] to [B, F, C, H, W]
+            latent = latent.permute(0, 2, 1, 3, 4)
+            image_latents = image_latents.permute(0, 2, 1, 3, 4)
+            # Padding image_latents to the same frame number as latent
+            padding_shape = (latent.shape[0], latent.shape[1] - 1, *latent.shape[2:])
+            latent_padding = image_latents.new_zeros(padding_shape)
+            image_latents = torch.cat([image_latents, latent_padding], dim=1)
+            if random.random() < self.args.noised_image_dropout:
+                image_latents = torch.zeros_like(image_latents)
+            
+            # warp condition
+            conditioning_latents = self.encode_video(batch["warp_frames"].permute(0, 2, 1, 3, 4))
+            conditioning_latents = conditioning_latents.permute(0, 2, 1, 3, 4)
+            torch.cuda.empty_cache()
+        
+        
+            # process mask
+            vae_scale_factor_spatial = 2 ** (len(self.components.vae.config.block_out_channels) - 1)
+            vae_scale_factor_temporal = self.components.vae.config.temporal_compression_ratio
+            
+            masks = batch["masks"].permute(0, 2, 1, 3, 4)
+            masks = torch.nn.functional.interpolate(
+                masks, 
+                size=(
+                    (masks.shape[-3] - 1) // vae_scale_factor_temporal + 1, 
+                    self.state.train_height // vae_scale_factor_spatial, 
+                    self.state.train_width // vae_scale_factor_spatial
+                )
+            ).permute(0, 2, 1, 3, 4).to(dtype=conditioning_latents.dtype)
+            conditioning_latents=torch.concat([conditioning_latents, masks], -3).to(dtype=weight_dtype)
+
+            # Sample noise that will be added to the latents
+            noise = torch.randn_like(latent).to(dtype=weight_dtype)
+            batch_size, num_frames, num_channels, height, width = latent.shape
+
+            # Sample a random timestep for each image
+            timesteps = torch.randint(
+                0, self.components.scheduler.config.num_train_timesteps, (batch_size,), device=latent.device
+            )
+            timesteps = timesteps.long()
+            transformer_config = self.state.transformer_config
+        
+        with CUDATimer("rotary positional embedding operations"):
+            # Prepare rotary embeds
+            image_rotary_emb = (
+                self.prepare_rotary_positional_embeddings(
+                    height=height * vae_scale_factor_spatial,
+                    width=width * vae_scale_factor_spatial,
+                    num_frames=num_frames,
+                    transformer_config=transformer_config,
+                    vae_scale_factor_spatial=vae_scale_factor_spatial,
+                    device=self.accelerator.device,
+                )
+                if transformer_config.use_rotary_positional_embeddings
+                else None
+            )
+
+            # Add noise to the model input according to the noise magnitude at each timestep
+            # (this is the forward diffusion process)
+            noisy_video_latents = self.components.scheduler.add_noise(latent, noise, timesteps)
+            noisy_model_input = torch.cat([noisy_video_latents, image_latents], dim=2)
+
+        torch.cuda.empty_cache()
+        # get current allocated memory
+        print(f"Allocated memory: {torch.cuda.memory_allocated(self.accelerator.device) / 1024**2} MB")
+        # offload the vae model to CPU
+        self.components.vae = self.components.vae.to("cpu")
+        # get current allocated memory
+        torch.cuda.empty_cache()
+        print(f"Allocated memory after move vae to cpu: {torch.cuda.memory_allocated(self.accelerator.device) / 1024**2} MB")
+        
+        model_output = self.components.backbone.forward_debug(
+            noisy_video_latents=noisy_video_latents,
+            noisy_model_input=noisy_model_input,
+            timesteps=timesteps,
+            warp_latents=conditioning_latents,
+            warp_masks=masks,
+            extrinsics=batch["extrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
+            intrinsics=batch["intrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
+            prompt_embedding=self.prompt_embedding.repeat(batch_size, *([1] * (len(self.prompt_embedding.shape) - 1))),
+            image_rotary_emb=image_rotary_emb,
+            drop_out_camera=random.random() < self.args.camera_condition_dropout,
+        )
+        
+        with CUDATimer("loss final computing process"):
+            model_pred = self.components.scheduler.get_velocity(model_output, noisy_video_latents, timesteps)
+            
+            weights = 1 / (1 - self.components.scheduler.alphas_cumprod[timesteps])
+            while len(weights.shape) < len(model_pred.shape):
+                weights = weights.unsqueeze(-1)
+
+            target = latent
+
+            loss = torch.mean((weights * (model_pred - target) ** 2).reshape(batch_size, -1), dim=1)
+            loss = loss.mean()
+            if self.args.loss_warp > 0:
+                warp_loss = torch.mean((weights * (model_pred*masks - target*masks) ** 2).reshape(batch_size, -1), dim=1)
+                warp_loss = warp_loss.mean()
+                loss = loss + self.args.loss_warp * warp_loss
+        return loss
+    
     
 register(
     model_name="cogvideox-camerawarp",

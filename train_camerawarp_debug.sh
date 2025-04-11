@@ -2,6 +2,7 @@
 
 # Prevent tokenizer parallelism issues
 export TOKENIZERS_PARALLELISM=false
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 OUTPUT_DIR=$1
 DATA_ROOT=$2
@@ -31,7 +32,7 @@ DATA_ARGS=(
 TRAIN_ARGS=(
     --train_epochs 10 # number of training epochs
     --seed 42 # random seed
-    --batch_size 2
+    --batch_size 1
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
 )
@@ -47,6 +48,7 @@ SYSTEM_ARGS=(
 CHECKPOINT_ARGS=(
     --checkpointing_steps 500 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
+    --resume_from_checkpoint /home/t-zelonglv/blob/zelong/workspace/TartanAirWarp/0410_CameraWarpDiT_a100x32/checkpoint-1000/
 )
 
 # Validation Configuration
@@ -55,6 +57,19 @@ VALIDATION_ARGS=(
     --validation_steps 500  # should be multiple of checkpointing_steps
     --gen_fps 16
 )
+
+# echo command
+echo "accelerate launch --config_file accelerate_config_base.yaml train.py  \
+    ${MODEL_ARGS[@]} \
+    ${OUTPUT_ARGS[@]} \
+    ${DATA_ARGS[@]} \
+    ${TRAIN_ARGS[@]} \
+    ${SYSTEM_ARGS[@]} \
+    ${CHECKPOINT_ARGS[@]} \
+    ${VALIDATION_ARGS[@]} \
+    --i_log 50 \
+    --i_print 50 \
+    --debug"
 
 # Combine all arguments and launch training
 accelerate launch --config_file accelerate_config_base.yaml train.py  \
@@ -66,4 +81,5 @@ accelerate launch --config_file accelerate_config_base.yaml train.py  \
     "${CHECKPOINT_ARGS[@]}" \
     "${VALIDATION_ARGS[@]}" \
     --i_log 50 \
-    --i_print 50
+    --i_print 50 \
+    --debug

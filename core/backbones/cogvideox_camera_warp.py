@@ -11,6 +11,7 @@ from diffusers.models.transformers.cogvideox_transformer_3d import CogVideoXTran
 from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
 from diffusers.loaders import CogVideoXLoraLoaderMixin
 from pathlib import Path
+from core.utils.debug_utils import CUDATimer
 logger = get_logger(LOG_NAME, LOG_LEVEL)
 
 
@@ -82,10 +83,65 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
         )[0]
         return model_output
     
+    def forward_debug(self, noisy_video_latents : torch.Tensor,
+        noisy_model_input : torch.Tensor,
+        timesteps : torch.Tensor,
+        warp_latents : torch.Tensor, 
+        warp_masks : torch.Tensor,
+        prompt_embedding : torch.Tensor,
+        image_rotary_emb : torch.Tensor,
+        extrinsics : torch.Tensor = None, 
+        intrinsics : torch.Tensor = None,
+        camera_hidden_states : torch.Tensor = None,
+        drop_out_camera=False) -> torch.Tensor:
+        
+        print("check if componets enable gradient checkpointing")
+        print("transformer checkpoints: ", self.transformer.gradient_checkpointing)
+        print("warp_encoder checkpoints: ", self.warp_encoder.gradient_checkpointing)
+        
+        with CUDATimer("camera encoding operation"):
+            weight_dtype = noisy_model_input.dtype
+            # camera condition
+            if not drop_out_camera:
+                if camera_hidden_states is None:
+                    camera_hidden_states = self.camera_encoder(extrinsics, intrinsics)
+                # print(image_latents.shape, camera_latents.shape)
+            else:
+                camera_hidden_states = None
+        with CUDATimer("warp encoder operation"):
+            # logger.info(f"noisy_model_input.shape: {noisy_model_input.shape}; prompt_embeds.shape: {prompt_embeds.shape}")
+            branch_block_samples = self.warp_encoder(
+                hidden_states=noisy_video_latents,
+                encoder_hidden_states=prompt_embedding,
+                branch_cond=warp_latents,
+                timestep=timesteps,
+                image_rotary_emb=image_rotary_emb,
+                return_dict=False,
+            )[0]
+            branch_block_samples = [block_sample.to(dtype=weight_dtype) for block_sample in branch_block_samples]
+        
+        with CUDATimer("transformer operation"):
+            model_output = self.transformer(
+                hidden_states=noisy_model_input,
+                encoder_hidden_states=prompt_embedding,
+                timestep=timesteps,
+                image_rotary_emb=image_rotary_emb,
+                return_dict=False,
+                branch_block_samples=branch_block_samples,
+                branch_block_masks=warp_masks,
+                camera_hidden_states=camera_hidden_states,
+            )[0]
+        return model_output
+    
     def enable_gradient_checkpointing(self):
         """Enables gradient checkpointing for the model."""
         self.transformer.enable_gradient_checkpointing()
         self.warp_encoder.enable_gradient_checkpointing()
+    
+    def disable_gradient_checkpointing(self):
+        """Disables gradient checkpointing for the model."""
+        self.transformer.disable_gradient_checkpointing()
+        self.warp_encoder.disable_gradient_checkpointing()
     
     def save_pretrained(self, save_path: str):
         save_path = Path(save_path)
