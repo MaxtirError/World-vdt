@@ -48,7 +48,6 @@ SYSTEM_ARGS=(
 CHECKPOINT_ARGS=(
     --checkpointing_steps 500 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
-    --resume_from_checkpoint /home/t-zelonglv/blob/zelong/workspace/TartanAirWarp/0410_CameraWarpDiT_a100x32/checkpoint-1000/
 )
 
 # Validation Configuration

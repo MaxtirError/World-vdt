@@ -119,7 +119,7 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
                 return_dict=False,
             )[0]
             branch_block_samples = [block_sample.to(dtype=weight_dtype) for block_sample in branch_block_samples]
-        
+        print("memory after warp encoder: ", torch.cuda.memory_allocated() / 1024 / 1024)
         with CUDATimer("transformer operation"):
             model_output = self.transformer(
                 hidden_states=noisy_model_input,

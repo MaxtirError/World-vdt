@@ -352,15 +352,6 @@ class CogVideoXI2VLoraTrainer(Trainer):
             noisy_video_latents = self.components.scheduler.add_noise(latent, noise, timesteps)
             noisy_model_input = torch.cat([noisy_video_latents, image_latents], dim=2)
 
-        torch.cuda.empty_cache()
-        # get current allocated memory
-        print(f"Allocated memory: {torch.cuda.memory_allocated(self.accelerator.device) / 1024**2} MB")
-        # offload the vae model to CPU
-        self.components.vae = self.components.vae.to("cpu")
-        # get current allocated memory
-        torch.cuda.empty_cache()
-        print(f"Allocated memory after move vae to cpu: {torch.cuda.memory_allocated(self.accelerator.device) / 1024**2} MB")
-        
         model_output = self.components.backbone.forward_debug(
             noisy_video_latents=noisy_video_latents,
             noisy_model_input=noisy_model_input,
