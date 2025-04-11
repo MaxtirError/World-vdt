@@ -19,4 +19,5 @@ lpips
 pandas
 psutil
 matplotlib
+click
 git+https://github.com/EasternJournalist/utils3d.git
