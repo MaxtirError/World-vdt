@@ -136,12 +136,12 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
     def enable_gradient_checkpointing(self):
         """Enables gradient checkpointing for the model."""
         self.transformer.enable_gradient_checkpointing()
-        self.warp_encoder.enable_gradient_checkpointing()
+        # self.warp_encoder.enable_gradient_checkpointing()
     
     def disable_gradient_checkpointing(self):
         """Disables gradient checkpointing for the model."""
         self.transformer.disable_gradient_checkpointing()
-        self.warp_encoder.disable_gradient_checkpointing()
+        # self.warp_encoder.disable_gradient_checkpointing()
     
     def save_pretrained(self, save_path: str):
         save_path = Path(save_path)

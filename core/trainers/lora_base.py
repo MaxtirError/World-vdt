@@ -703,8 +703,11 @@ class Trainer:
                     output_dir=self.args.output_dir,
                 )
                 self.accelerator.save_state("./cache/")
+                # for deepspeed
+                # first wait main process to save the state
                 if self.accelerator.is_main_process:
-                    # for deepspeed
-                    # mv to save_path
                     os.makedirs(save_path, exist_ok=True)
-                    os.system(f"mv ./cache/* {save_path}")
+                    os.system(f"mv ./cache/* {save_path}")  
+                self.accelerator.wait_for_everyone()
+                # for deepspeed
+                os.system(f"mv ./cache/* {save_path}")
