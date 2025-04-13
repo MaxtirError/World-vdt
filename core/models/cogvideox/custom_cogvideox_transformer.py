@@ -13,6 +13,7 @@ from diffusers.configuration_utils import register_to_config
 import numpy as np
 import torch.nn.functional as F
 from diffusers.models.embeddings import CogVideoXPatchEmbed
+from diffusers.models.modeling_utils import ModelMixin
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -23,11 +24,14 @@ class CogVideoxWarpOutput(BaseOutput):
 class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
     @register_to_config
     def __init__(self,
+        num_layers: int = 2,
         in_channels: int = 16,
         num_attention_heads: int = 30,
         attention_head_dim: int = 64, 
         **kwargs):
-        super().__init__(in_channels=in_channels,
+        super().__init__(
+            num_layers=num_layers,
+            in_channels=in_channels,
             num_attention_heads=num_attention_heads,
             attention_head_dim=attention_head_dim, 
             **kwargs)
@@ -37,23 +41,23 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         self.branch_blocks = nn.ModuleList([])
         for _ in range(len(self.transformer_blocks)):
             self.branch_blocks.append(zero_module(nn.Linear(inner_dim, inner_dim)))
-        
+            
         # replace the patch embedding layer
         self.patch_embed = CogVideoXPatchEmbed(
-            patch_size=self.patch_size,
+            patch_size=self.config.patch_size,
             in_channels=in_channels * 2 + 1 if in_channels == 16 else in_channels + 1,
             embed_dim=inner_dim,
-            text_embed_dim=self.text_embed_dim,
+            text_embed_dim=self.config.text_embed_dim,
             bias=True,
-            sample_width=self.sample_width,
-            sample_height=self.sample_height,
-            sample_frames=self.sample_frames,
-            temporal_compression_ratio=self.temporal_compression_ratio,
-            max_text_seq_length=self.max_text_seq_length,
-            spatial_interpolation_scale=self.spatial_interpolation_scale,
-            temporal_interpolation_scale=self.temporal_interpolation_scale,
-            use_positional_embeddings=not self.use_rotary_positional_embeddings,
-            use_learned_positional_embeddings=self.use_learned_positional_embeddings,
+            sample_width=self.config.sample_width,
+            sample_height=self.config.sample_height,
+            sample_frames=self.config.sample_frames,
+            temporal_compression_ratio=self.config.temporal_compression_ratio,
+            max_text_seq_length=self.config.max_text_seq_length,
+            spatial_interpolation_scale=self.config.spatial_interpolation_scale,
+            temporal_interpolation_scale=self.config.temporal_interpolation_scale,
+            use_positional_embeddings=not self.config.use_rotary_positional_embeddings,
+            use_learned_positional_embeddings=self.config.use_learned_positional_embeddings,
         )
         
     @classmethod

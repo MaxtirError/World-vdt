@@ -30,7 +30,7 @@ DATA_ARGS=(
 
 # Training Configuration
 TRAIN_ARGS=(
-    --train_epochs 10 # number of training epochs
+    --train_epochs 100 # number of training epochs
     --seed 42 # random seed
     --batch_size 2
     --gradient_accumulation_steps 1
@@ -47,7 +47,9 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 500 # save checkpoint every x steps
+    --checkpointing_steps 500 # save checkpoint every x steps    
+    --resume_from_checkpoint "/mnt/blob/workspace/TartanAirWarp/0411_CameraWarpDiT_a100x32_continue/checkpoint-3970/"
+    --load_checkpoint_only
 )
 
 # Validation Configuration

@@ -9,13 +9,13 @@ from core.constants import LOG_LEVEL, LOG_NAME
 from accelerate.logging import get_logger
 from diffusers.models.transformers.cogvideox_transformer_3d import CogVideoXTransformer3DModel
 from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
-from diffusers.loaders import CogVideoXLoraLoaderMixin
+from core.pipe import CogVideoXI2VCameraWarpPipeline
 from pathlib import Path
 from core.utils.debug_utils import CUDATimer
 logger = get_logger(LOG_NAME, LOG_LEVEL)
 
 
-class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
+class CogVideoXCameraWarpDiffusion(torch.nn.Module):
     def __init__(self, model_path: str, 
             cache_dir : str,
             warp_num_layers: int,
@@ -34,12 +34,14 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
             pretrained_transformer, warp_num_layers,
             attention_head_dim=pretrained_transformer.config.attention_head_dim,
             num_attention_heads=pretrained_transformer.config.num_attention_heads)
+        self.warp_encoder.register_to_config(**self.warp_encoder.config)
         del pretrained_transformer
         
         inner_dim = self.transformer.config.num_attention_heads * self.transformer.attention_head_dim
         self.camera_encoder = CameraEncoder3D(
             resolution=(train_height, train_width), 
             out_channel = inner_dim)
+        self.camera_encoder.register_to_config(**self.camera_encoder.config)
     
     def forward(self, noisy_video_latents : torch.Tensor,
         noisy_model_input : torch.Tensor,
@@ -153,7 +155,7 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
     def from_pretrained(self, load_path: str):
         load_path = Path(load_path)
         # load transformer lora
-        lora_state_dict = self.load_lora_weights(load_path / "transformer")
+        lora_state_dict = CogVideoXI2VCameraWarpPipeline.lora_state_dict(load_path / "transformer")
         transformer_state_dict = {
             f'{k.replace("transformer.", "")}': v
             for k, v in lora_state_dict.items()
@@ -168,5 +170,11 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
                         f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
                         f" {unexpected_keys}. "
                     )
-        self.warp_encoder.from_pretrained(load_path / "warp_encoder", subfolder="warp_encoder")
-        self.camera_encoder.from_pretrained(load_path / "camera_encoder", subfolder="camera_encoder")
+        load_warp_encoder = CogVideoXWarpEncoder.from_pretrained(
+            load_path / "warp_encoder", subfolder="warp_encoder"
+        )
+        self.warp_encoder.load_state_dict(load_warp_encoder.state_dict(), strict=False)
+        camera_encoder = CameraEncoder3D.from_pretrained(
+            load_path / "camera_encoder", subfolder="camera_encoder"
+        )
+        self.camera_encoder.load_state_dict(camera_encoder.state_dict())

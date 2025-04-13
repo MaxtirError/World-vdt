@@ -367,7 +367,18 @@ class Trainer:
             num_update_steps_per_epoch=self.state.num_update_steps_per_epoch,
         )
         if resume_from_checkpoint_path is not None:
-            self.accelerator.load_state(resume_from_checkpoint_path)
+            if self.args.load_checkpoint_only:
+                logger.info(f"Loading checkpoint from {resume_from_checkpoint_path}")
+                self.components.backbone.from_pretrained(resume_from_checkpoint_path)
+            else:
+                try:
+                    self.accelerator.load_state(resume_from_checkpoint_path)
+                except Exception as e:
+                    logger.info(
+                        f"Warning: Failed to load state from {resume_from_checkpoint_path}. Error: {e}. Now trying to only load the checkpoint "
+                    )
+                    self.components.backbone.from_pretrained(resume_from_checkpoint_path)
+                    #load_state(resume_from_checkpoint_path, load_optimizer_states=False)
 
         accelerator = self.accelerator
         generator = torch.Generator(device=accelerator.device)
@@ -707,7 +718,12 @@ class Trainer:
                 # first wait main process to save the state
                 if self.accelerator.is_main_process:
                     os.makedirs(save_path, exist_ok=True)
-                    os.system(f"mv ./cache/* {save_path}")  
+                    os.system(f"cp -r ./cache/* {save_path}")  
+                    # clear cache
+                    os.system("rm -rf ./cache/*")
                 self.accelerator.wait_for_everyone()
                 # for deepspeed
-                os.system(f"mv ./cache/* {save_path}")
+                if not self.accelerator.is_main_process:
+                    # save the remaining processes
+                    os.system(f"cp -r ./cache/* {save_path}")
+                    os.system("rm -rf ./cache/*")

@@ -26,7 +26,6 @@ from diffusers.image_processor import PipelineImageInput
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 from diffusers.loaders import CogVideoXLoraLoaderMixin
 from diffusers.models import AutoencoderKLCogVideoX
-from core.backbones import CogVideoXCameraWarpDiffusion
 from diffusers.models.embeddings import get_3d_rotary_pos_embed
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.schedulers import CogVideoXDDIMScheduler, CogVideoXDPMScheduler
@@ -172,7 +171,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
         tokenizer: T5Tokenizer,
         text_encoder: T5EncoderModel,
         vae: AutoencoderKLCogVideoX,
-        backbone: CogVideoXCameraWarpDiffusion,
+        backbone,
         scheduler: Union[CogVideoXDDIMScheduler, CogVideoXDPMScheduler],
     ):
         super().__init__()
