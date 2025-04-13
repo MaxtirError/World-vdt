@@ -149,6 +149,7 @@ class Trainer:
                 self.components.vae.enable_tiling()
 
         self.state.transformer_config = self.components.backbone.transformer.config
+        
 
     def prepare_dataset(self) -> None:
         logger.info("Initializing dataset and dataloader")
@@ -723,7 +724,7 @@ class Trainer:
                     os.system("rm -rf ./cache/*")
                 self.accelerator.wait_for_everyone()
                 # for deepspeed
-                if not self.accelerator.is_main_process:
-                    # save the remaining processes
+                if not self.accelerator.is_main_process and self.accelerator.local_process_index == 0:
+                    # save the remaining processes, each node will save its own state
                     os.system(f"cp -r ./cache/* {save_path}")
                     os.system("rm -rf ./cache/*")
