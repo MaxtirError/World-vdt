@@ -11,11 +11,12 @@ from diffusers.models.transformers.cogvideox_transformer_3d import CogVideoXTran
 from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
 from core.pipe import CogVideoXI2VCameraWarpPipeline
 from pathlib import Path
+from diffusers.loaders import CogVideoXLoraLoaderMixin
 from core.utils.debug_utils import CUDATimer
 logger = get_logger(LOG_NAME, LOG_LEVEL)
 
 
-class CogVideoXCameraWarpDiffusion(torch.nn.Module):
+class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
     def __init__(self, model_path: str, 
             cache_dir : str,
             warp_num_layers: int,
