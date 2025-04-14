@@ -11,7 +11,7 @@ from core.datasets import TartanAirCameraWarpDataset
 from utils import *
 import pipeline
 from diffusers import AutoencoderKLCogVideoX
-
+debug=True
 
 def encode_video(vae, video: torch.Tensor) -> torch.Tensor:
     # shape of input video: [B, C, F, H, W]
@@ -83,6 +83,8 @@ def main(root: str, log_path: Optional[str], output_path: Optional[str], num_thr
     # @catch_exception
     def _write_data(data):
         save_dir = Path(data['save_dir'])
+        if debug:
+            save_dir = "./debugs/visualize_latent"
         save_dir.mkdir(parents=True, exist_ok=True)
         torch.save(data['latent'], save_dir / "latent.pt")
         torch.save(data['warp_latent'], save_dir / "warp_latent.pt")
