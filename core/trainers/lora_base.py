@@ -377,15 +377,7 @@ class Trainer:
                 logger.info(f"Loading checkpoint from {resume_from_checkpoint_path}")
                 self.components.backbone.from_pretrained(resume_from_checkpoint_path)
             else:
-                try:
-                    self.accelerator.load_state(resume_from_checkpoint_path)
-                except Exception as e:
-                    logger.info(
-                        f"Warning: Failed to load state from {resume_from_checkpoint_path}. Error: {e}. Now trying to only load the checkpoint "
-                    )
-                    self.components.backbone.from_pretrained(resume_from_checkpoint_path)
-                    #load_state(resume_from_checkpoint_path, load_optimizer_states=False)
-
+                self.accelerator.load_state(resume_from_checkpoint_path)
         accelerator = self.accelerator
         generator = torch.Generator(device=accelerator.device)
         if self.args.seed is not None:
