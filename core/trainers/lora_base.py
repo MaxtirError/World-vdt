@@ -210,6 +210,8 @@ class Trainer:
         # enable backbone's gradient except for transformer
         self.components.backbone.requires_grad_(True)
         self.components.backbone.transformer.requires_grad_(False)
+        # need to learn the position embedding
+        print(self.components.backbone.transformer.patch_embed.pos_embedding.requires_grad)
 
         # add LoRA to backbone's transformer
         transformer_lora_config = LoraConfig(
@@ -220,6 +222,8 @@ class Trainer:
         )
         self.components.backbone.transformer.add_adapter(transformer_lora_config)
         self.__prepare_saving_loading_hooks(transformer_lora_config)
+        
+        self.components.backbone.transformer.patch_embed.pos_embedding.requires_grad_(True)
 
         # Load components needed for training to GPU (except transformer), and cast them to the specified data type
         ignore_list = ["backbone"] + self.UNLOAD_LIST
@@ -388,7 +392,7 @@ class Trainer:
             generator = generator.manual_seed(self.args.seed)
         self.state.generator = generator
         
-        if global_step > 0:
+        if global_step > 0 or self.args.debug:
             self.validate(global_step)
 
         free_memory()
@@ -718,17 +722,17 @@ class Trainer:
                     step=global_step,
                     output_dir=self.args.output_dir,
                 )
-                self.accelerator.save_state("./cache/")
+                self.accelerator.save_state("./cache/temp_state/")
                 # for deepspeed
                 # first wait main process to save the state
                 if self.accelerator.is_main_process:
                     os.makedirs(save_path, exist_ok=True)
-                    os.system(f"cp -r ./cache/* {save_path}")  
+                    os.system(f"cp -r ./cache/temp_state/* {save_path}")  
                     # clear cache
-                    os.system("rm -rf ./cache/*")
+                    os.system("rm -rf ./cache/temp_state/*")
                 self.accelerator.wait_for_everyone()
                 # for deepspeed
                 if not self.accelerator.is_main_process and self.accelerator.local_process_index == 0:
                     # save the remaining processes, each node will save its own state
-                    os.system(f"cp -r ./cache/* {save_path}")
-                    os.system("rm -rf ./cache/*")
+                    os.system(f"cp -r ./cache/temp_state/* {save_path}")
+                    os.system("rm -rf ./cache/temp_state/*")

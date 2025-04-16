@@ -14,6 +14,7 @@ import numpy as np
 import torch.nn.functional as F
 from diffusers.models.embeddings import CogVideoXPatchEmbed
 from diffusers.models.modeling_utils import ModelMixin
+from easydict import EasyDict as edict
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -28,6 +29,7 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         in_channels: int = 16,
         num_attention_heads: int = 30,
         attention_head_dim: int = 64, 
+        sample_frames: int = 49,
         sample_width: int = 90,
         sample_height: int = 60,
         **kwargs):
@@ -36,6 +38,7 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
             in_channels=in_channels,
             num_attention_heads=num_attention_heads,
             attention_head_dim=attention_head_dim, 
+            sample_frames=sample_frames,
             sample_width=sample_width,
             sample_height=sample_height,
             **kwargs)
@@ -45,23 +48,23 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         self.branch_blocks = nn.ModuleList([])
         for _ in range(len(self.transformer_blocks)):
             self.branch_blocks.append(zero_module(nn.Linear(inner_dim, inner_dim)))
-            
+        config = edict(kwargs)
         # replace the patch embedding layer
         self.patch_embed = CogVideoXPatchEmbed(
-            patch_size=self.config.patch_size,
+            patch_size=config.patch_size,
             in_channels=in_channels * 2 + 1 if in_channels == 16 else in_channels + 1,
             embed_dim=inner_dim,
-            text_embed_dim=self.config.text_embed_dim,
+            text_embed_dim=config.text_embed_dim,
             bias=True,
             sample_width=sample_width,
             sample_height=sample_height,
-            sample_frames=self.config.sample_frames,
-            temporal_compression_ratio=self.config.temporal_compression_ratio,
-            max_text_seq_length=self.config.max_text_seq_length,
-            spatial_interpolation_scale=self.config.spatial_interpolation_scale,
-            temporal_interpolation_scale=self.config.temporal_interpolation_scale,
-            use_positional_embeddings=not self.config.use_rotary_positional_embeddings,
-            use_learned_positional_embeddings=self.config.use_learned_positional_embeddings,
+            sample_frames=sample_frames,
+            temporal_compression_ratio=config.temporal_compression_ratio,
+            max_text_seq_length=config.max_text_seq_length,
+            spatial_interpolation_scale=config.spatial_interpolation_scale,
+            temporal_interpolation_scale=config.temporal_interpolation_scale,
+            use_positional_embeddings=not config.use_rotary_positional_embeddings,
+            use_learned_positional_embeddings=config.use_learned_positional_embeddings,
         )
         
     @classmethod
@@ -72,6 +75,7 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         attention_head_dim: int = 128,
         num_attention_heads: int = 24,
         load_weights_from_transformer=True,
+        train_frames: int = 49,
         sample_width: int = 90,
         sample_height: int = 60,
     ):
@@ -79,6 +83,7 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         config["num_layers"] = num_layers
         config["attention_head_dim"] = attention_head_dim
         config["num_attention_heads"] = num_attention_heads
+        config["sample_frames"] = train_frames
         config["sample_width"] = sample_width
         config["sample_height"] = sample_height
         branch = cls(**config)
@@ -230,16 +235,21 @@ class CogVideoXCameraWarpTransformer(CogVideoXTransformer3DModel):
         super().__init__(**kwargs)
         
     @classmethod
-    def from_transformer(cls, transformer, sample_width: int = 90, sample_height: int = 60):
+    def from_transformer(cls, transformer, train_frames : int = 25, sample_width: int = 90, sample_height: int = 60):
         config = transformer.config
         # set the config for the transformer
+        config["sample_frames"] = train_frames
         config["sample_width"] = sample_width
         config["sample_height"] = sample_height
         warp_model = cls(**config)
         state_dict = transformer.state_dict()
-        # remove the patch_embed.pos_embedding
+        # remove the patch embedding from the state dict
         state_dict.pop("patch_embed.pos_embedding", None)
         warp_model.load_state_dict(state_dict, strict=False)
+        # replase pos_embedding as a Parameter
+        warp_model.patch_embed.pos_embedding = nn.Parameter(
+            warp_model.patch_embed.pos_embedding.data, requires_grad=True
+        )
         return warp_model
     
     def forward(

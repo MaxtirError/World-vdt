@@ -54,13 +54,15 @@ class CogVideoXI2VLoraTrainer(Trainer):
         vae_scale_factor_spatial = 2 ** (len(components.vae.config.block_out_channels) - 1)
         sample_height = self.state.train_height // vae_scale_factor_spatial
         sample_width = self.state.train_width // vae_scale_factor_spatial
-        print(f"sample height: {sample_height}, sample width: {sample_width}")
+        if self.args.debug:
+            print(f"sample height: {sample_height}, sample width: {sample_width}")
         components.backbone = CogVideoXCameraWarpDiffusion(
             model_path=model_path,
             cache_dir=cache_dir,
             warp_num_layers=self.args.warp_num_layers,
             train_height=self.state.train_height,
             train_width=self.state.train_width,
+            train_frames=self.state.train_frames,
             sample_height=sample_height,
             sample_width=sample_width,
         )

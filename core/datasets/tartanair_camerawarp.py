@@ -34,7 +34,7 @@ class TartanAirCameraWarpDataset(Dataset):
             
         '''
         assert num_frames == 49 or num_frames == 25, "Only 49 and 25 frames are supported"
-        # assert (height, width) == (480, 720) or (height, width) == (240, 360), "Only 480x720 and 240x360 are supported"
+        assert (height, width) == (480, 720) or (height, width) == (320, 480), "Only 480x720 and 240x360 are supported"
         self.root = Path(root)
         self.num_frames = num_frames
         self.height = height
@@ -55,12 +55,12 @@ class TartanAirCameraWarpDataset(Dataset):
         '''
         video = imageio.get_reader(str(video_path))
         # get the first num_frames frames
-        video = [frame for frame in video.iter_data()][:self.num_frames]
+        video = [frame for frame in video.iter_data()]
         video = torch.tensor(np.array(video)).permute(0, 3, 1, 2) / 255.0 * 2 - 1.0
         F, C, H, W = video.shape
         if self.height != H or self.width != W:
             video = torch.nn.functional.interpolate(video, size=(self.height, self.width), mode='bilinear')
-        assert video.shape == (self.num_frames, 3, self.height, self.width), f"video shape mismatch: {video.shape} != {(self.num_frames, 3, self.height, self.width)}"
+        # assert video.shape == (self.num_frames, 3, self.height, self.width), f"video shape mismatch: {video.shape} != {(self.num_frames, 3, self.height, self.width)}"
         return video.float()
     
     def _load_mask(self, mask_path):
@@ -70,11 +70,11 @@ class TartanAirCameraWarpDataset(Dataset):
         Returns:
             mask: (num_frames, 1, H, W) tensor of mask
         '''
-        mask = torch.tensor(np.load(mask_path)).float().unsqueeze(1)[:self.num_frames]
+        mask = torch.tensor(np.load(mask_path)).float().unsqueeze(1)
         F, C, H, W = mask.shape
         if self.height != H or self.width != W:
             mask = torch.nn.functional.interpolate(mask, size=(self.height, self.width), mode="nearest")
-        assert mask.shape == (self.num_frames, 1, self.height, self.width), f"mask shape mismatch: {mask.shape} != {(self.num_frames, 1, self.height, self.width)}"
+        # assert mask.shape == (self.num_frames, 1, self.height, self.width), f"mask shape mismatch: {mask.shape} != {(self.num_frames, 1, self.height, self.width)}"
         return mask
     
     def _load_meta(self, meta_path):
@@ -102,8 +102,30 @@ class TartanAirCameraWarpDataset(Dataset):
         warp_frames = self._load_video(instance_path / "warp_frames.mp4")
         masks = self._load_mask(instance_path / "mask.npy")
         meta = self._load_meta(instance_path / "meta.json")
-        intrinsics = torch.tensor(meta["intrinsics"])[:self.num_frames]
-        extrinsics = torch.tensor(meta["extrinsics"])[:self.num_frames]
+        intrinsics = torch.tensor(meta["intrinsics"])
+        extrinsics = torch.tensor(meta["extrinsics"])
+        
+        if self.num_frames < frames.shape[0]:
+            assert frames.shape[0] == 49
+            if np.random.rand() > 0.5:
+                frames = frames[::2]
+                warp_frames = warp_frames[::2]
+                masks = masks[::2]
+                intrinsics = intrinsics[::2]
+                extrinsics = extrinsics[::2]
+            else:
+                frames = frames[:self.num_frames]
+                warp_frames = warp_frames[:self.num_frames]
+                masks = masks[:self.num_frames]
+                intrinsics = intrinsics[:self.num_frames]
+                extrinsics = extrinsics[:self.num_frames]
+                
+        assert frames.shape == (self.num_frames, 3, self.height, self.width), f"frames shape mismatch: {frames.shape} != {(self.num_frames, 3, self.height, self.width)}"
+        assert warp_frames.shape == (self.num_frames, 3, self.height, self.width), f"warp_frames shape mismatch: {warp_frames.shape} != {(self.num_frames, 3, self.height, self.width)}"
+        assert masks.shape == (self.num_frames, 1, self.height, self.width), f"masks shape mismatch: {masks.shape} != {(self.num_frames, 1, self.height, self.width)}"
+        assert intrinsics.shape == (self.num_frames, 3, 3), f"intrinsics shape mismatch: {intrinsics.shape} != {(self.num_frames, 3, 3)}"
+        assert extrinsics.shape == (self.num_frames, 4, 4), f"extrinsics shape mismatch: {extrinsics.shape} != {(self.num_frames, 4, 4)}"
+        
         if self.use_precompute_vae_latent:
             prefix = "" if self.height == 480 else "_small"
             latent_path = instance_path / f"latent{prefix}.pt"

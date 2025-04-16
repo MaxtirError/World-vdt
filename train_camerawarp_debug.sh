@@ -46,14 +46,14 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 500 # save checkpoint every x steps
+    --checkpointing_steps 10 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
 )
 
 # Validation Configuration
 VALIDATION_ARGS=(
     --do_validation true  # ["true", "false"]
-    --validation_steps 500  # should be multiple of checkpointing_steps
+    --validation_steps 10  # should be multiple of checkpointing_steps
     --gen_fps 16
 )
 
@@ -67,8 +67,7 @@ echo "accelerate launch --config_file accelerate_config_base.yaml train.py  \
     ${CHECKPOINT_ARGS[@]} \
     ${VALIDATION_ARGS[@]} \
     --i_log 50 \
-    --i_print 50 \
-    --debug"
+    --i_print 50"
 
 # Combine all arguments and launch training
 accelerate launch --config_file accelerate_config_base.yaml train.py  \

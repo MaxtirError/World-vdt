@@ -22,6 +22,7 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
             warp_num_layers: int,
             train_height: int,
             train_width: int,
+            train_frames: int,
             sample_height: int,
             sample_width: int,):
         super().__init__()
@@ -33,6 +34,7 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
             pretrained_transformer = CogVideoXTransformer3DModel.from_pretrained(model_path, subfolder="transformer")
         self.transformer : CogVideoXCameraWarpTransformer = CogVideoXCameraWarpTransformer.from_transformer(
             transformer=pretrained_transformer,
+            train_frames=train_frames,
             sample_height=sample_height,
             sample_width=sample_width,)
         
@@ -40,6 +42,7 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
             pretrained_transformer, warp_num_layers,
             attention_head_dim=pretrained_transformer.config.attention_head_dim,
             num_attention_heads=pretrained_transformer.config.num_attention_heads,
+            train_frames=train_frames,
             sample_height=sample_height,
             sample_width=sample_width,)
         self.warp_encoder.register_to_config(**self.warp_encoder.config)
