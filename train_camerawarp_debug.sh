@@ -25,7 +25,7 @@ OUTPUT_ARGS=(
 # Data Configuration
 DATA_ARGS=(
     --data_root ${DATA_ROOT}
-    --train_resolution "49x480x720"  # (frames x height x width), frames should be 8N+1
+    --train_resolution "25x320x480"  # (frames x height x width), frames should be 8N+1
 )
 
 # Training Configuration
@@ -35,7 +35,6 @@ TRAIN_ARGS=(
     --batch_size 2
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
-    --gradient_checkpointing
 )
 
 # System Configuration
@@ -49,8 +48,6 @@ SYSTEM_ARGS=(
 CHECKPOINT_ARGS=(
     --checkpointing_steps 500 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
-    --resume_from_checkpoint "/home/t-zelonglv/blob/zelong/workspace/TartanAirWarp/0411_CameraWarpDiT_a100x32_continue/checkpoint-3970/"
-    --load_checkpoint_only
 )
 
 # Validation Configuration

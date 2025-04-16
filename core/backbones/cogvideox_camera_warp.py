@@ -21,7 +21,9 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
             cache_dir : str,
             warp_num_layers: int,
             train_height: int,
-            train_width: int):
+            train_width: int,
+            sample_height: int,
+            sample_width: int,):
         super().__init__()
         self.model_path = model_path
         self.warp_num_layers = warp_num_layers
@@ -29,12 +31,17 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
             pretrained_transformer = CogVideoXTransformer3DModel.from_pretrained(model_path, subfolder="transformer", cache_dir=cache_dir)
         except:
             pretrained_transformer = CogVideoXTransformer3DModel.from_pretrained(model_path, subfolder="transformer")
-        self.transformer : CogVideoXCameraWarpTransformer = CogVideoXCameraWarpTransformer.from_transformer(pretrained_transformer)
+        self.transformer : CogVideoXCameraWarpTransformer = CogVideoXCameraWarpTransformer.from_transformer(
+            transformer=pretrained_transformer,
+            sample_height=sample_height,
+            sample_width=sample_width,)
         
         self.warp_encoder : CogVideoXWarpEncoder = CogVideoXWarpEncoder.from_transformer(
             pretrained_transformer, warp_num_layers,
             attention_head_dim=pretrained_transformer.config.attention_head_dim,
-            num_attention_heads=pretrained_transformer.config.num_attention_heads)
+            num_attention_heads=pretrained_transformer.config.num_attention_heads,
+            sample_height=sample_height,
+            sample_width=sample_width,)
         self.warp_encoder.register_to_config(**self.warp_encoder.config)
         del pretrained_transformer
         
@@ -112,6 +119,9 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
             else:
                 camera_hidden_states = None
         with CUDATimer("warp encoder operation"):
+            print("noisy_video_latents.shape: ", noisy_video_latents.shape)
+            print("noisy_model_input.shape: ", noisy_model_input.shape)
+            print("prompt_embedding.shape: ", prompt_embedding.shape)
             # logger.info(f"noisy_model_input.shape: {noisy_model_input.shape}; prompt_embeds.shape: {prompt_embeds.shape}")
             branch_block_samples = self.warp_encoder(
                 hidden_states=noisy_video_latents,

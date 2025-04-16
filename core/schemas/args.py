@@ -22,6 +22,7 @@ class Args(BaseModel):
 
     ########## Data ###########
     data_root: Path
+    use_precompute_vae_latent: bool = False
 
     ########## Training #########
     resume_from_checkpoint: Optional[Path] = None
@@ -177,6 +178,7 @@ class Args(BaseModel):
         parser.add_argument("--num_workers", type=int, default=8)
         parser.add_argument("--pin_memory", type=bool, default=True)
         parser.add_argument("--image_column", type=str, default=None)
+        parser.add_argument("--use_precompute_vae_latent", action="store_true", default=False)
 
         # Model configuration
         parser.add_argument("--mixed_precision", type=str, default="no")

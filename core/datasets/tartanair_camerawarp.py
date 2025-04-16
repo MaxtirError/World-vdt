@@ -11,7 +11,8 @@ class TartanAirCameraWarpDataset(Dataset):
         root : str,
         num_frames : int,
         height : int,
-        width : int,):
+        width : int,
+        use_precompute_vae_latent : bool = False):
         '''
         This class loads TartanAir dataset for camera warp task.
         dataset structure:
@@ -22,17 +23,23 @@ class TartanAirCameraWarpDataset(Dataset):
         │   ├── meta.json
         |   ├── warp_frames.mp4
         |   ├── mask.npy
+        |   ├── latent.pt (optional)
+        |   ├── ...
         Args:
             root: path to the dataset
             num_frames: number of frames to load
             height: height of the images
             width: width of the images
+            use_precompute_vae_latent: whether to use precomputed VAE latent
             
         '''
+        assert num_frames == 49 or num_frames == 25, "Only 49 and 25 frames are supported"
+        # assert (height, width) == (480, 720) or (height, width) == (240, 360), "Only 480x720 and 240x360 are supported"
         self.root = Path(root)
         self.num_frames = num_frames
         self.height = height
         self.width = width
+        self.use_precompute_vae_latent = use_precompute_vae_latent
         # read .index.txt file and splitlines for instances path
         self.instances = (self.root / ".index.txt").read_text().splitlines()
 
@@ -47,8 +54,13 @@ class TartanAirCameraWarpDataset(Dataset):
             video: (num_frames, 3, H, W) tensor of images
         '''
         video = imageio.get_reader(str(video_path))
-        video = [frame for frame in video.iter_data()]
+        # get the first num_frames frames
+        video = [frame for frame in video.iter_data()][:self.num_frames]
         video = torch.tensor(np.array(video)).permute(0, 3, 1, 2) / 255.0 * 2 - 1.0
+        F, C, H, W = video.shape
+        if self.height != H or self.width != W:
+            video = torch.nn.functional.interpolate(video, size=(self.height, self.width), mode='bilinear')
+        assert video.shape == (self.num_frames, 3, self.height, self.width), f"video shape mismatch: {video.shape} != {(self.num_frames, 3, self.height, self.width)}"
         return video.float()
     
     def _load_mask(self, mask_path):
@@ -56,9 +68,13 @@ class TartanAirCameraWarpDataset(Dataset):
         Args:
             mask_path: path to the mask
         Returns:
-            mask: (num_frames, H, W) tensor of mask
+            mask: (num_frames, 1, H, W) tensor of mask
         '''
-        mask = torch.tensor(np.load(mask_path) / 255.0).float()
+        mask = torch.tensor(np.load(mask_path)).float().unsqueeze(1)[:self.num_frames]
+        F, C, H, W = mask.shape
+        if self.height != H or self.width != W:
+            mask = torch.nn.functional.interpolate(mask, size=(self.height, self.width), mode="nearest")
+        assert mask.shape == (self.num_frames, 1, self.height, self.width), f"mask shape mismatch: {mask.shape} != {(self.num_frames, 1, self.height, self.width)}"
         return mask
     
     def _load_meta(self, meta_path):
@@ -86,23 +102,27 @@ class TartanAirCameraWarpDataset(Dataset):
         warp_frames = self._load_video(instance_path / "warp_frames.mp4")
         masks = self._load_mask(instance_path / "mask.npy")
         meta = self._load_meta(instance_path / "meta.json")
-        intrinsics = torch.tensor(meta["intrinsics"])
-        extrinsics = torch.tensor(meta["extrinsics"])
-        return {
-            "frames": frames,
-            "warp_frames": warp_frames,
-            "masks": masks.unsqueeze(1),
-            "intrinsics": intrinsics,
-            "extrinsics": extrinsics,
-        }
-    
-    @staticmethod
-    def collate_fn(batch):
-        frames = torch.stack([sample["frames"] for sample in batch])
-        warp_frames = torch.stack([sample["warp_frames"] for sample in batch])
-        masks = torch.stack([sample["masks"] for sample in batch])
-        intrinsics = torch.stack([sample["intrinsics"] for sample in batch])
-        extrinsics = torch.stack([sample["extrinsics"] for sample in batch])
+        intrinsics = torch.tensor(meta["intrinsics"])[:self.num_frames]
+        extrinsics = torch.tensor(meta["extrinsics"])[:self.num_frames]
+        if self.use_precompute_vae_latent:
+            prefix = "" if self.height == 480 else "_small"
+            latent_path = instance_path / f"latent{prefix}.pt"
+            warp_latent_path = instance_path / f"warp_latent{prefix}.pt"
+            if latent_path.exists() and warp_latent_path.exists():
+                latent = torch.load(latent_path)
+                warp_latent = torch.load(warp_latent_path)
+            else:
+                raise FileNotFoundError(f"Precomputed VAE latent not found: {latent_path}")
+            return {
+                "frames": frames,
+                "warp_frames": warp_frames,
+                "masks": masks,
+                "intrinsics": intrinsics,
+                "extrinsics": extrinsics,
+                "latents": latent,
+                "warp_latents": warp_latent
+            }
+
         return {
             "frames": frames,
             "warp_frames": warp_frames,
@@ -110,3 +130,7 @@ class TartanAirCameraWarpDataset(Dataset):
             "intrinsics": intrinsics,
             "extrinsics": extrinsics,
         }
+    
+    @staticmethod
+    def collate_fn(batch):
+        return {k : torch.stack([d[k] for d in batch]) for k in batch[0].keys()}

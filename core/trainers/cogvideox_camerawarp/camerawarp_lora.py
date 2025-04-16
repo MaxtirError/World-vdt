@@ -46,17 +46,24 @@ class CogVideoXI2VLoraTrainer(Trainer):
         except:
             components.text_encoder = T5EncoderModel.from_pretrained(model_path, subfolder="text_encoder")
 
+        try:
+            components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae", cache_dir=cache_dir)
+        except:
+            components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae")
+            
+        vae_scale_factor_spatial = 2 ** (len(components.vae.config.block_out_channels) - 1)
+        sample_height = self.state.train_height // vae_scale_factor_spatial
+        sample_width = self.state.train_width // vae_scale_factor_spatial
+        print(f"sample height: {sample_height}, sample width: {sample_width}")
         components.backbone = CogVideoXCameraWarpDiffusion(
             model_path=model_path,
             cache_dir=cache_dir,
             warp_num_layers=self.args.warp_num_layers,
             train_height=self.state.train_height,
-            train_width=self.state.train_width
+            train_width=self.state.train_width,
+            sample_height=sample_height,
+            sample_width=sample_width,
         )
-        try:
-            components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae", cache_dir=cache_dir)
-        except:
-            components.vae = AutoencoderKLCogVideoX.from_pretrained(model_path, subfolder="vae")
         
         try:
             components.scheduler = CogVideoXDPMScheduler.from_pretrained(model_path, subfolder="scheduler", cache_dir=cache_dir)
@@ -102,7 +109,12 @@ class CogVideoXI2VLoraTrainer(Trainer):
     @override
     def compute_loss(self, batch) -> torch.Tensor:
         # model input
-        latent = self.encode_video(batch["frames"].permute(0, 2, 1, 3, 4))
+        # latent not in the batch
+        if self.args.use_precompute_vae_latent:
+            latent = batch["latents"].to(device=self.accelerator.device, dtype=self.state.weight_dtype)
+        else:
+            latent = self.encode_video(batch["frames"].permute(0, 2, 1, 3, 4))
+            latent = latent.permute(0, 2, 1, 3, 4)
         weight_dtype = self.state.weight_dtype
         
         # image condition
@@ -112,7 +124,6 @@ class CogVideoXI2VLoraTrainer(Trainer):
         noisy_images = images + torch.randn_like(images) * image_noise_sigma[:, None, None, None, None]
         image_latents = self.encode_video(noisy_images)
         # from [B, C, F, H, W] to [B, F, C, H, W]
-        latent = latent.permute(0, 2, 1, 3, 4)
         image_latents = image_latents.permute(0, 2, 1, 3, 4)
         # Padding image_latents to the same frame number as latent
         padding_shape = (latent.shape[0], latent.shape[1] - 1, *latent.shape[2:])
@@ -122,10 +133,13 @@ class CogVideoXI2VLoraTrainer(Trainer):
             image_latents = torch.zeros_like(image_latents)
         
         # warp condition
-        conditioning_latents = self.encode_video(batch["warp_frames"].permute(0, 2, 1, 3, 4))
-        conditioning_latents = conditioning_latents.permute(0, 2, 1, 3, 4)
+        if self.args.use_precompute_vae_latent:
+            conditioning_latents = batch["warp_latents"].to(device=self.accelerator.device, dtype=weight_dtype)
+        else:
+            conditioning_latents = self.encode_video(batch["warp_frames"].permute(0, 2, 1, 3, 4))
+            conditioning_latents = conditioning_latents.permute(0, 2, 1, 3, 4)
+            
         torch.cuda.empty_cache()
-        
         
         # process mask
         vae_scale_factor_spatial = 2 ** (len(self.components.vae.config.block_out_channels) - 1)
@@ -281,7 +295,11 @@ class CogVideoXI2VLoraTrainer(Trainer):
     def compute_loss_debug(self, batch) -> torch.Tensor:
         with CUDATimer("vae encoding operations"):
             # model input
-            latent = self.encode_video(batch["frames"].permute(0, 2, 1, 3, 4))
+            if self.args.use_precompute_vae_latent:
+                latent = batch["latents"].to(device=self.accelerator.device, dtype=self.state.weight_dtype)
+            else:
+                latent = self.encode_video(batch["frames"].permute(0, 2, 1, 3, 4))
+                latent = latent.permute(0, 2, 1, 3, 4)
             weight_dtype = self.state.weight_dtype
         
             # image condition
@@ -291,7 +309,6 @@ class CogVideoXI2VLoraTrainer(Trainer):
             noisy_images = images + torch.randn_like(images) * image_noise_sigma[:, None, None, None, None]
             image_latents = self.encode_video(noisy_images)
             # from [B, C, F, H, W] to [B, F, C, H, W]
-            latent = latent.permute(0, 2, 1, 3, 4)
             image_latents = image_latents.permute(0, 2, 1, 3, 4)
             # Padding image_latents to the same frame number as latent
             padding_shape = (latent.shape[0], latent.shape[1] - 1, *latent.shape[2:])
@@ -301,8 +318,11 @@ class CogVideoXI2VLoraTrainer(Trainer):
                 image_latents = torch.zeros_like(image_latents)
             
             # warp condition
-            conditioning_latents = self.encode_video(batch["warp_frames"].permute(0, 2, 1, 3, 4))
-            conditioning_latents = conditioning_latents.permute(0, 2, 1, 3, 4)
+            if self.args.use_precompute_vae_latent:
+                conditioning_latents = batch["warp_latents"].to(device=self.accelerator.device, dtype=weight_dtype)
+            else:
+                conditioning_latents = self.encode_video(batch["warp_frames"].permute(0, 2, 1, 3, 4))
+                conditioning_latents = conditioning_latents.permute(0, 2, 1, 3, 4)
             torch.cuda.empty_cache()
         
         
@@ -366,6 +386,7 @@ class CogVideoXI2VLoraTrainer(Trainer):
         )
         
         with CUDATimer("loss final computing process"):
+            print(model_output.shape, noisy_video_latents.shape, timesteps.shape)
             model_pred = self.components.scheduler.get_velocity(model_output, noisy_video_latents, timesteps)
             
             weights = 1 / (1 - self.components.scheduler.alphas_cumprod[timesteps])

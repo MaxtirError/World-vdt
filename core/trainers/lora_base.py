@@ -160,6 +160,7 @@ class Trainer:
                 num_frames=self.state.train_frames,
                 height=self.state.train_height,
                 width=self.state.train_width,
+                use_precompute_vae_latent=self.args.use_precompute_vae_latent,
             )
         else:
             raise ValueError(f"Invalid model type: {self.args.model_type}")
@@ -386,6 +387,9 @@ class Trainer:
         if self.args.seed is not None:
             generator = generator.manual_seed(self.args.seed)
         self.state.generator = generator
+        
+        if global_step > 0:
+            self.validate(global_step)
 
         free_memory()
         for epoch in range(first_epoch, self.args.train_epochs):

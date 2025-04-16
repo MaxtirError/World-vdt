@@ -28,12 +28,16 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         in_channels: int = 16,
         num_attention_heads: int = 30,
         attention_head_dim: int = 64, 
+        sample_width: int = 90,
+        sample_height: int = 60,
         **kwargs):
         super().__init__(
             num_layers=num_layers,
             in_channels=in_channels,
             num_attention_heads=num_attention_heads,
             attention_head_dim=attention_head_dim, 
+            sample_width=sample_width,
+            sample_height=sample_height,
             **kwargs)
         
         inner_dim = num_attention_heads * attention_head_dim
@@ -49,8 +53,8 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
             embed_dim=inner_dim,
             text_embed_dim=self.config.text_embed_dim,
             bias=True,
-            sample_width=self.config.sample_width,
-            sample_height=self.config.sample_height,
+            sample_width=sample_width,
+            sample_height=sample_height,
             sample_frames=self.config.sample_frames,
             temporal_compression_ratio=self.config.temporal_compression_ratio,
             max_text_seq_length=self.config.max_text_seq_length,
@@ -68,11 +72,15 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         attention_head_dim: int = 128,
         num_attention_heads: int = 24,
         load_weights_from_transformer=True,
+        sample_width: int = 90,
+        sample_height: int = 60,
     ):
         config = transformer.config
         config["num_layers"] = num_layers
         config["attention_head_dim"] = attention_head_dim
         config["num_attention_heads"] = num_attention_heads
+        config["sample_width"] = sample_width
+        config["sample_height"] = sample_height
         branch = cls(**config)
 
         if load_weights_from_transformer:
@@ -222,9 +230,16 @@ class CogVideoXCameraWarpTransformer(CogVideoXTransformer3DModel):
         super().__init__(**kwargs)
         
     @classmethod
-    def from_transformer(cls, transformer):
-        warp_model = cls(**transformer.config)
-        warp_model.load_state_dict(transformer.state_dict())
+    def from_transformer(cls, transformer, sample_width: int = 90, sample_height: int = 60):
+        config = transformer.config
+        # set the config for the transformer
+        config["sample_width"] = sample_width
+        config["sample_height"] = sample_height
+        warp_model = cls(**config)
+        state_dict = transformer.state_dict()
+        # remove the patch_embed.pos_embedding
+        state_dict.pop("patch_embed.pos_embedding", None)
+        warp_model.load_state_dict(state_dict, strict=False)
         return warp_model
     
     def forward(
