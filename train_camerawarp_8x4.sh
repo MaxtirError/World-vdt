@@ -46,9 +46,7 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 500 # save checkpoint every x steps    
-    --resume_from_checkpoint "/mnt/blob/workspace/TartanAirWarp/0411_CameraWarpDiT_a100x32_continue/checkpoint-3970/"
-    --load_checkpoint_only
+    --checkpointing_steps 500 # save checkpoint every x steps  
 )
 
 # Validation Configuration
