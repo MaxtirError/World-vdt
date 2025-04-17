@@ -405,9 +405,18 @@ class CogVideoXI2VLoraTrainer(Trainer):
                 loss = loss + self.args.loss_warp * warp_loss
         return loss
     
+class CogVideoXI2VSftTrainer(CogVideoXI2VLoraTrainer):
+    pass
+    
     
 register(
     model_name="cogvideox-camerawarp",
     training_type="lora",
     trainer_cls=CogVideoXI2VLoraTrainer
+)
+
+register(
+    model_name="cogvideox-camerawarp",
+    training_type="sft",
+    trainer_cls=CogVideoXI2VSftTrainer
 )

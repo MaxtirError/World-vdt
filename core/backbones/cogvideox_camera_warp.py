@@ -14,9 +14,10 @@ from pathlib import Path
 from diffusers.loaders import CogVideoXLoraLoaderMixin
 from core.utils.debug_utils import CUDATimer
 logger = get_logger(LOG_NAME, LOG_LEVEL)
+from diffusers.models.modeling_utils import ModelMixin
 
 
-class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
+class CogVideoXCameraWarpDiffusion(ModelMixin, CogVideoXLoraLoaderMixin):
     def __init__(self, model_path: str, 
             cache_dir : str,
             warp_num_layers: int,
@@ -152,12 +153,12 @@ class CogVideoXCameraWarpDiffusion(torch.nn.Module, CogVideoXLoraLoaderMixin):
     def enable_gradient_checkpointing(self):
         """Enables gradient checkpointing for the model."""
         self.transformer.enable_gradient_checkpointing()
-        # self.warp_encoder.enable_gradient_checkpointing()
+        self.warp_encoder.enable_gradient_checkpointing()
     
     def disable_gradient_checkpointing(self):
         """Disables gradient checkpointing for the model."""
         self.transformer.disable_gradient_checkpointing()
-        # self.warp_encoder.disable_gradient_checkpointing()
+        self.warp_encoder.disable_gradient_checkpointing()
     
     def save_pretrained(self, save_path: str):
         save_path = Path(save_path)

@@ -205,28 +205,30 @@ class Trainer:
         # For LoRA, we freeze all the parameters
         for attr_name, component in vars(self.components).items():
             if hasattr(component, "requires_grad_"):
-                component.requires_grad_(False)
+                if self.args.training_type == "sft" and attr_name == "backbone":
+                    component.requires_grad_(True)
+                else:
+                    component.requires_grad_(False)
         
         # enable backbone's gradient except for transformer
-        self.components.backbone.requires_grad_(True)
-        self.components.backbone.transformer.requires_grad_(False)
-        # need to learn the position embedding
-        print(self.components.backbone.transformer.patch_embed.pos_embedding.requires_grad)
 
-        # add LoRA to backbone's transformer
-        transformer_lora_config = LoraConfig(
-            r=self.args.rank,
-            lora_alpha=self.args.lora_alpha,
-            init_lora_weights=True,
-            target_modules=self.args.target_modules,
-        )
-        self.components.backbone.transformer.add_adapter(transformer_lora_config)
-        self.__prepare_saving_loading_hooks(transformer_lora_config)
+        if self.args.training_type == "lora":
+            # add LoRA to backbone's transformer
+            transformer_lora_config = LoraConfig(
+                r=self.args.rank,
+                lora_alpha=self.args.lora_alpha,
+                init_lora_weights=True,
+                target_modules=self.args.target_modules,
+            )
+            self.components.backbone.transformer.add_adapter(transformer_lora_config)
+            self.__prepare_saving_loading_hooks(transformer_lora_config)
         
-        self.components.backbone.transformer.patch_embed.pos_embedding.requires_grad_(True)
+            self.components.backbone.requires_grad_(True)
+            self.components.backbone.transformer.requires_grad_(False)
+        # self.components.backbone.to(self.accelerator.device, dtype=weight_dtype)
 
         # Load components needed for training to GPU (except transformer), and cast them to the specified data type
-        ignore_list = ["backbone"] + self.UNLOAD_LIST
+        ignore_list = self.UNLOAD_LIST
         self.__move_components_to_device(dtype=weight_dtype, ignore_list=ignore_list)
 
         if self.args.gradient_checkpointing:
@@ -244,9 +246,9 @@ class Trainer:
 
     def prepare_optimizer(self) -> None:
         logger.info("Initializing optimizer and lr scheduler")
-
+        
         # Make sure the trainable params are in float32
-        cast_training_params([self.components.backbone], dtype=torch.float32)
+        # cast_training_params([self.components.backbone], dtype=torch.float32)
 
         backbone_parameters = list(filter(lambda p: p.requires_grad, self.components.backbone.parameters()))
         parameters_with_lr = {
@@ -384,7 +386,7 @@ class Trainer:
             generator = generator.manual_seed(self.args.seed)
         self.state.generator = generator
         
-        if global_step > 0 or self.args.debug:
+        if global_step > 0:
             self.validate(global_step)
 
         free_memory()
@@ -409,6 +411,8 @@ class Trainer:
                         loss = self.compute_loss(batch)
 
                     if self.args.debug:
+                        # get memory usage before backward
+                        print("memory before backward: ", torch.cuda.memory_allocated() / 1024 / 1024)
                         with CUDATimer("backward"):
                             accelerator.backward(loss)
                     else:
@@ -528,24 +532,8 @@ class Trainer:
 
         #####  Initialize pipeline  #####
         pipe = self.initialize_pipeline()
+        pipe = pipe.to(accelerator.device, dtype=self.state.weight_dtype)
 
-        if self.state.using_deepspeed:
-            # Can't using model_cpu_offload in deepspeed,
-            # so we need to move all components in pipe to device
-            # pipe.to(self.accelerator.device, dtype=self.state.weight_dtype)
-            self.__move_components_to_device(dtype=self.state.weight_dtype, ignore_list=["backbone"] + self.UNLOAD_LIST)
-        else:
-            # if not using deepspeed, use model_cpu_offload to further reduce memory usage
-            # Or use pipe.enable_sequential_cpu_offload() to further reduce memory usage
-            pipe.enable_model_cpu_offload(device=self.accelerator.device)
-
-            # Convert all model weights to training dtype
-            # Note, this will change LoRA weights in self.components.transformer to training dtype, rather than keep them in fp32
-            pipe = pipe.to(dtype=self.state.weight_dtype)
-
-        #################################
-
-        all_processes_artifacts = []
         for i in range(num_validation_samples):
             if self.state.using_deepspeed and self.accelerator.deepspeed_plugin.zero_stage != 3:
                 # Skip current validation on all processes but one
@@ -586,20 +574,8 @@ class Trainer:
                     logger.debug(f"Saving video to {filename}")
                     export_to_video(artifact_value, filename, fps=self.args.gen_fps)
 
-        ##########  Clean up  ##########
-        if self.state.using_deepspeed:
-            del pipe
-            # Unload models except those needed for training
-            self.__move_components_to_cpu(unload_list=self.UNLOAD_LIST)
-        else:
-            pipe.remove_all_hooks()
-            del pipe
-            # Load models except those not needed for training
-            self.__move_components_to_device(dtype=self.state.weight_dtype, ignore_list=self.UNLOAD_LIST)
-            self.components.backbone.to(self.accelerator.device, dtype=self.state.weight_dtype)
-
-            # Change trainable weights back to fp32 to keep with dtype after prepare the model
-            cast_training_params([self.components.backbone], dtype=torch.float32)
+        pipe.remove_all_hooks()
+        del pipe
 
         free_memory()
         accelerator.wait_for_everyone()

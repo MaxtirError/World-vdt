@@ -13,7 +13,7 @@ MODEL_ARGS=(
     --cache_dir "./cache/hub/"
     --model_name "cogvideox-camerawarp"
     --model_type "camerawarp"
-    --training_type "lora"
+    --training_type "sft"
 )
 
 # Output Configuration
@@ -32,7 +32,7 @@ DATA_ARGS=(
 TRAIN_ARGS=(
     --train_epochs 10 # number of training epochs
     --seed 42 # random seed
-    --batch_size 2
+    --batch_size 1
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
 )
@@ -48,7 +48,7 @@ SYSTEM_ARGS=(
 CHECKPOINT_ARGS=(
     --checkpointing_steps 10 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
-    --resume_from_checkpoint "/home/t-zelonglv/world-vdt/debugs/debug/checkpoint-10"
+    --gradient_checkpointing
 )
 
 # Validation Configuration
@@ -59,7 +59,7 @@ VALIDATION_ARGS=(
 )
 
 # echo command
-echo "accelerate launch --config_file accelerate_config_base.yaml train.py  \
+echo "accelerate launch train.py  \
     ${MODEL_ARGS[@]} \
     ${OUTPUT_ARGS[@]} \
     ${DATA_ARGS[@]} \

@@ -23,3 +23,4 @@ class State(BaseModel):
     generator: Optional[torch.Generator] = None
 
     using_deepspeed: bool = False
+    using_fsdp: bool = False

@@ -158,7 +158,7 @@ class CogVideoXI2VCameraWarpPipeline(DiffusionPipeline, CogVideoXLoraLoaderMixin
     """
 
     _optional_components = []
-    model_cpu_offload_seq = "text_encoder->transformer->vae"
+    model_cpu_offload_seq = "text_encoder->backbone->vae"
 
     _callback_tensor_inputs = [
         "latents",
