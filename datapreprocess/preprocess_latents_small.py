@@ -77,7 +77,10 @@ def main(root: str, log_path: Optional[str], output_path: Optional[str], num_thr
     )
     vae_scale_factor_spatial = 2 ** (len(vae.config.block_out_channels) - 1)
     vae_scale_factor_temporal = vae.config.temporal_compression_ratio
-    all_index = list(range(len(dataset.instances)) * 2)
+    # all_index = list(range(len(dataset.instances))) * 2
+    # because of this bug, we need to deal with the remaining data
+    data_num = len(dataset.instances)
+    all_index = [i + data_num for i in range(data_num)]
     # * 2 because target_frames = 25 
     start_index = local_rank * len(all_index) // world_size
     end_index = (local_rank + 1) * len(all_index) // world_size
