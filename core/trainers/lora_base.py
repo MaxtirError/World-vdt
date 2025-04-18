@@ -214,6 +214,8 @@ class Trainer:
 
         if self.args.training_type == "lora":
             # add LoRA to backbone's transformer
+            self.components.backbone.requires_grad_(True)
+            self.components.backbone.transformer.requires_grad_(False)
             transformer_lora_config = LoraConfig(
                 r=self.args.rank,
                 lora_alpha=self.args.lora_alpha,
@@ -223,8 +225,6 @@ class Trainer:
             self.components.backbone.transformer.add_adapter(transformer_lora_config)
             self.__prepare_saving_loading_hooks(transformer_lora_config)
         
-            self.components.backbone.requires_grad_(True)
-            self.components.backbone.transformer.requires_grad_(False)
         # self.components.backbone.to(self.accelerator.device, dtype=weight_dtype)
 
         # Load components needed for training to GPU (except transformer), and cast them to the specified data type
