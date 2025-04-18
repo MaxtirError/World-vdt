@@ -9,7 +9,7 @@ deepspeed_config:
   zero_stage: 2
   deepspeed_multinode_launcher: standard
 distributed_type: DEEPSPEED
-downcast_bf16: 'yes'
+downcast_bf16: 'no'
 enable_cpu_affinity: false
 machine_rank: 0
 main_training_function: main

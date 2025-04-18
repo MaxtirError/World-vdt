@@ -168,8 +168,6 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         # timesteps does not contain any weights and will always return f32 tensors
         # but time_embedding might actually be running in fp16. so we need to cast here.
         # there might be better ways to encapsulate this.
-        print("t_emb.dtype", t_emb.dtype)
-        print("hidden_states.dtype", hidden_states.dtype)
         t_emb = t_emb.to(dtype=hidden_states.dtype)
         emb = self.time_embedding(t_emb, timestep_cond)
 

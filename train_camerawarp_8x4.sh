@@ -13,7 +13,7 @@ MODEL_ARGS=(
     --cache_dir "$CACHE_DIR"
     --model_name "cogvideox-camerawarp"
     --model_type "camerawarp"
-    --training_type "lora"
+    --training_type "sft"
 )
 
 # Output Configuration
