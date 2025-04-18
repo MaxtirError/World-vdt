@@ -386,7 +386,7 @@ class Trainer:
             generator = generator.manual_seed(self.args.seed)
         self.state.generator = generator
         
-        if global_step > 0 or self.args.debug:
+        if global_step > 0: #or self.args.debug:
             self.validate(global_step)
 
         free_memory()
