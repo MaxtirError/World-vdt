@@ -244,7 +244,9 @@ class CogVideoXCameraWarpTransformer(CogVideoXTransformer3DModel):
         warp_model = cls(**config)
         state_dict = transformer.state_dict()
         # remove the patch embedding from the state dict
-        state_dict.pop("patch_embed.pos_embedding", None)
+        if train_frames != 49:
+            logger.warning("Warning: The model is trained with 49 frames, but the current model is set to 25 frames. The patch embedding will be removed from the state dict.")
+            state_dict.pop("patch_embed.pos_embedding", None)
         warp_model.load_state_dict(state_dict, strict=False)
         return warp_model
     
