@@ -26,7 +26,6 @@ OUTPUT_ARGS=(
 DATA_ARGS=(
     --data_root ${DATA_ROOT}
     --train_resolution "25x480x720"  # (frames x height x width), frames should be 8N+1
-    --use_precompute_vae_latent
 )
 
 # Training Configuration
