@@ -237,6 +237,8 @@ class CogVideoXCameraWarpTransformer(CogVideoXTransformer3DModel):
     @classmethod
     def from_transformer(cls, transformer, train_frames : int = 25, sample_width: int = 90, sample_height: int = 60):
         config = transformer.config
+        ori_sample_width = config.sample_width
+        ori_sample_height = config.sample_height
         # set the config for the transformer
         config["sample_frames"] = train_frames
         config["sample_width"] = sample_width
@@ -246,7 +248,22 @@ class CogVideoXCameraWarpTransformer(CogVideoXTransformer3DModel):
         # remove the patch embedding from the state dict
         if train_frames != 49:
             logger.warning("Warning: The model is trained with 49 frames, but the current model is set to 25 frames. The patch embedding will be removed from the state dict.")
-            state_dict.pop("patch_embed.pos_embedding", None)
+            if ori_sample_width != sample_width or ori_sample_height != sample_height:
+                state_dict.pop("patch_embed.pos_embedding", None)
+            else:
+                old_pos_embedding = state_dict["patch_embed.pos_embedding"]
+                spatail_pos_embedding = old_pos_embedding[:, config.max_text_seq_length:, :]
+                # print("spatial_pos_embedding.shape", spatail_pos_embedding.shape)
+                embed_dim = config.num_attention_heads * config.attention_head_dim
+                p = config.patch_size
+                spatila_pos_embedding = spatail_pos_embedding.reshape(1, -1, sample_width * sample_height // (p * p), embed_dim)
+                # print("spatila_pos_embedding.shape", spatila_pos_embedding.shape)
+                cur_temporal_size = (train_frames - 1) // config.temporal_compression_ratio + 1
+                spatila_pos_embedding = spatila_pos_embedding[:, :cur_temporal_size, :, :].reshape(1, -1, embed_dim)
+                new_pos_embedding = torch.cat([old_pos_embedding[:, :config.max_text_seq_length, :], spatila_pos_embedding], dim=1)
+                state_dict["patch_embed.pos_embedding"] = new_pos_embedding
+                
+                
         warp_model.load_state_dict(state_dict, strict=False)
         return warp_model
     

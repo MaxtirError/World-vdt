@@ -25,7 +25,7 @@ OUTPUT_ARGS=(
 # Data Configuration
 DATA_ARGS=(
     --data_root ${DATA_ROOT}
-    --train_resolution "49x480x720"  # (frames x height x width), frames should be 8N+1
+    --train_resolution "25x480x720"  # (frames x height x width), frames should be 8N+1
 )
 
 # Training Configuration
@@ -35,7 +35,6 @@ TRAIN_ARGS=(
     --batch_size 1
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
-    --gradient_checkpointing
 )
 
 # System Configuration
