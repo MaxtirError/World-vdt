@@ -406,7 +406,7 @@ class CogVideoXCameraWarpTransformer(CogVideoXTransformer3DModel):
                 if branch_block_masks is None:
                     hidden_states = hidden_states + branch_block_samples[i // interval_control]
                 else:
-                    hidden_states = torch.where(masks == False, hidden_states + branch_block_samples[i // interval_control], hidden_states)
+                    hidden_states = torch.where(masks == True, hidden_states + branch_block_samples[i // interval_control], hidden_states)
 
             if return_hidden_states:
                 hidden_states_list.append(torch.cat([encoder_hidden_states, hidden_states], dim=1))
