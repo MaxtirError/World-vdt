@@ -47,14 +47,14 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 500 # save checkpoint every x steps  
+    --checkpointing_steps 2000 # save checkpoint every x steps  
     --resume_from_checkpoint "/mnt/blob/workspace/TartanAirWarp/0418_lora_debug_32xA100_49x480x720/checkpoint-9500/"
 )
 
 # Validation Configuration
 VALIDATION_ARGS=(
     --do_validation true  # ["true", "false"]
-    --validation_steps 500  # should be multiple of checkpointing_steps
+    --validation_steps 1000  # should be multiple of checkpointing_steps
     --gen_fps 16
 )
 
