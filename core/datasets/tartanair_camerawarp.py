@@ -104,6 +104,7 @@ class TartanAirCameraWarpDataset(Dataset):
         meta = self._load_meta(instance_path / "meta.json")
         intrinsics = torch.tensor(meta["intrinsics"])
         extrinsics = torch.tensor(meta["extrinsics"])
+        sample_type=""
         
         if self.num_frames < frames.shape[0]:
             assert frames.shape[0] == 49
@@ -113,12 +114,14 @@ class TartanAirCameraWarpDataset(Dataset):
                 masks = masks[::2]
                 intrinsics = intrinsics[::2]
                 extrinsics = extrinsics[::2]
+                sample_type = "_1"
             else:
                 frames = frames[:self.num_frames]
                 warp_frames = warp_frames[:self.num_frames]
                 masks = masks[:self.num_frames]
                 intrinsics = intrinsics[:self.num_frames]
                 extrinsics = extrinsics[:self.num_frames]
+                sample_type = "_0"
                 
         assert frames.shape == (self.num_frames, 3, self.height, self.width), f"frames shape mismatch: {frames.shape} != {(self.num_frames, 3, self.height, self.width)}"
         assert warp_frames.shape == (self.num_frames, 3, self.height, self.width), f"warp_frames shape mismatch: {warp_frames.shape} != {(self.num_frames, 3, self.height, self.width)}"
@@ -127,9 +130,9 @@ class TartanAirCameraWarpDataset(Dataset):
         assert extrinsics.shape == (self.num_frames, 4, 4), f"extrinsics shape mismatch: {extrinsics.shape} != {(self.num_frames, 4, 4)}"
         
         if self.use_precompute_vae_latent:
-            prefix = "" if self.height == 480 else "_small"
-            latent_path = instance_path / f"latent{prefix}.pt"
-            warp_latent_path = instance_path / f"warp_latent{prefix}.pt"
+            resolution =f"{self.num_frames}x{self.height}x{self.width}"
+            latent_path = instance_path / "_fitting_latent" / f"latent_{resolution}{sample_type}.pt"
+            warp_latent_path = instance_path / "_fitting_latent" / f"warp_latent_{resolution}{sample_type}.pt"
             if latent_path.exists() and warp_latent_path.exists():
                 latent = torch.load(latent_path)
                 warp_latent = torch.load(warp_latent_path)

@@ -26,6 +26,7 @@ OUTPUT_ARGS=(
 DATA_ARGS=(
     --data_root ${DATA_ROOT}
     --train_resolution "25x480x720"  # (frames x height x width), frames should be 8N+1
+    --use_precompute_vae_latent
 )
 
 # Training Configuration
@@ -47,6 +48,7 @@ SYSTEM_ARGS=(
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
     --checkpointing_steps 500 # save checkpoint every x steps  
+    --resume_from_checkpoint "/mnt/blob/workspace/TartanAirWarp/0418_lora_debug_32xA100_49x480x720/checkpoint-9500/"
 )
 
 # Validation Configuration

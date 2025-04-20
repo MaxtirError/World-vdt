@@ -26,6 +26,7 @@ OUTPUT_ARGS=(
 DATA_ARGS=(
     --data_root ${DATA_ROOT}
     --train_resolution "25x480x720"  # (frames x height x width), frames should be 8N+1
+    --use_precompute_vae_latent
 )
 
 # Training Configuration
@@ -48,6 +49,7 @@ SYSTEM_ARGS=(
 CHECKPOINT_ARGS=(
     --checkpointing_steps 10 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
+    --resume_from_checkpoint "/home/t-zelonglv/world-vdt/debugs/debug_lora/checkpoint-10"
 )
 
 # Validation Configuration

@@ -22,6 +22,7 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 class CogVideoxWarpOutput(BaseOutput):
     branch_block_samples: Tuple[torch.Tensor]
 
+
 class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
     @register_to_config
     def __init__(self,
@@ -32,6 +33,27 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         sample_frames: int = 49,
         sample_width: int = 90,
         sample_height: int = 60,
+        activation_fn: str = "gelu-approximate",
+        attention_bias: bool = True,
+        dropout: float = 0.0,
+        flip_sin_to_cos: bool = True,
+        freq_shift: int = 0,
+        max_text_seq_length: int = 226,
+        norm_elementwise_affine: bool = True,
+        norm_eps: float = 1e-5,
+        ofs_embed_dim: int = None,
+        out_channels: int = 16,
+        patch_bias: bool = True,
+        patch_size: int = 2,
+        patch_size_t: int = None,
+        spatial_interpolation_scale: float = 1.875,
+        temporal_compression_ratio: int = 4,
+        temporal_interpolation_scale: float = 1.0,
+        text_embed_dim: int = 4096,
+        time_embed_dim: int = 512,
+        timestep_activation_fn: str = "silu",
+        use_learned_positional_embeddings: bool = True,
+        use_rotary_positional_embeddings: bool = True,
         **kwargs):
         super().__init__(
             num_layers=num_layers,
@@ -41,6 +63,27 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
             sample_frames=sample_frames,
             sample_width=sample_width,
             sample_height=sample_height,
+            activation_fn=activation_fn,
+            attention_bias=attention_bias,
+            dropout=dropout,
+            flip_sin_to_cos=flip_sin_to_cos,
+            freq_shift=freq_shift,
+            max_text_seq_length=max_text_seq_length,
+            norm_elementwise_affine=norm_elementwise_affine,
+            norm_eps=norm_eps,
+            ofs_embed_dim=ofs_embed_dim,
+            out_channels=out_channels,
+            patch_bias=patch_bias,
+            patch_size=patch_size,
+            patch_size_t=patch_size_t,
+            spatial_interpolation_scale=spatial_interpolation_scale,
+            temporal_compression_ratio=temporal_compression_ratio,
+            temporal_interpolation_scale=temporal_interpolation_scale,
+            text_embed_dim=text_embed_dim,
+            time_embed_dim=time_embed_dim,
+            timestep_activation_fn=timestep_activation_fn,
+            use_learned_positional_embeddings=use_learned_positional_embeddings,
+            use_rotary_positional_embeddings=use_rotary_positional_embeddings,
             **kwargs)
         
         inner_dim = num_attention_heads * attention_head_dim
@@ -48,23 +91,22 @@ class CogVideoXWarpEncoder(CogVideoXTransformer3DModel):
         self.branch_blocks = nn.ModuleList([])
         for _ in range(len(self.transformer_blocks)):
             self.branch_blocks.append(zero_module(nn.Linear(inner_dim, inner_dim)))
-        config = edict(kwargs)
         # replace the patch embedding layer
         self.patch_embed = CogVideoXPatchEmbed(
-            patch_size=config.patch_size,
+            patch_size=patch_size,
             in_channels=in_channels * 2 + 1 if in_channels == 16 else in_channels + 1,
             embed_dim=inner_dim,
-            text_embed_dim=config.text_embed_dim,
+            text_embed_dim=text_embed_dim,
             bias=True,
             sample_width=sample_width,
             sample_height=sample_height,
             sample_frames=sample_frames,
-            temporal_compression_ratio=config.temporal_compression_ratio,
-            max_text_seq_length=config.max_text_seq_length,
-            spatial_interpolation_scale=config.spatial_interpolation_scale,
-            temporal_interpolation_scale=config.temporal_interpolation_scale,
-            use_positional_embeddings=not config.use_rotary_positional_embeddings,
-            use_learned_positional_embeddings=config.use_learned_positional_embeddings,
+            temporal_compression_ratio=temporal_compression_ratio,
+            max_text_seq_length=max_text_seq_length,
+            spatial_interpolation_scale=spatial_interpolation_scale,
+            temporal_interpolation_scale=temporal_interpolation_scale,
+            use_positional_embeddings=not use_rotary_positional_embeddings,
+            use_learned_positional_embeddings=use_learned_positional_embeddings,
         )
         
     @classmethod
