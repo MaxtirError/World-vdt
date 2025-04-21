@@ -386,6 +386,12 @@ class Trainer:
             generator = generator.manual_seed(self.args.seed)
         self.state.generator = generator
         
+        if self.args.validation_only:
+            logger.info("Validation only mode. Skipping training.")
+            for i in range(10, 20):
+                self.validate(i)
+            return 0
+            
         if global_step > 0: #or self.args.debug:
             self.validate(global_step)
 
@@ -458,11 +464,13 @@ class Trainer:
                 # Print progress
                 if accelerator.is_main_process and global_step % self.args.i_print == 0:
                     speed = self.args.i_print / (time_elapsed - time_last_print) * 3600
+                    max_memory_allocated = torch.cuda.max_memory_allocated(accelerator.device)
                     columns = [
                         f'Step: {global_step}/{self.args.train_steps} ({global_step / self.args.train_steps * 100:.2f}%)',
                         f'Elapsed: {time_elapsed / 3600:.2f} h',
                         f'Speed: {speed:.2f} steps/h',
                         f'ETA: {(self.args.train_steps - global_step) / speed:.2f} h',
+                        f"Max mem: {max_memory_allocated / 1024 / 1024:.2f} MB",
                     ]
                     time_last_print = time_elapsed
                     description = '| '.join([c.ljust(25) for c in columns])

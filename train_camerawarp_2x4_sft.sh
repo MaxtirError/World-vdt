@@ -2,6 +2,7 @@
 
 # Prevent tokenizer parallelism issues
 export TOKENIZERS_PARALLELISM=false
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 OUTPUT_DIR=$1
 DATA_ROOT=$2
@@ -26,13 +27,14 @@ OUTPUT_ARGS=(
 DATA_ARGS=(
     --data_root ${DATA_ROOT}
     --train_resolution "25x320x480"  # (frames x height x width), frames should be 8N+1
+    --use_precompute_vae_latent
 )
 
 # Training Configuration
 TRAIN_ARGS=(
     --train_epochs 500 # number of training epochs
     --seed 42 # random seed
-    --batch_size 1
+    --batch_size 2
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
     --gradient_checkpointing
@@ -60,8 +62,8 @@ VALIDATION_ARGS=(
 # Combine all arguments and launch training
 accelerate launch \
     --config_file accelerate_config_base.yaml \
-    --num_machines 1 \
-    --num_processes 4 train.py  \
+    --num_machines 2 \
+    --num_processes 8 train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
@@ -69,5 +71,5 @@ accelerate launch \
     "${SYSTEM_ARGS[@]}" \
     "${CHECKPOINT_ARGS[@]}" \
     "${VALIDATION_ARGS[@]}" \
-    --i_log 50 \
+    --i_log 10 \
     --i_print 50

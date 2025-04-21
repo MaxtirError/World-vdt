@@ -81,6 +81,7 @@ class Args(BaseModel):
     do_validation: bool = False
     validation_steps: Optional[int]  # if set, should be a multiple of checkpointing_steps
     gen_fps: int = 15
+    validation_only: bool = False
     
     ########## Loss weight ##########
     loss_warp: float = 0.0
@@ -203,6 +204,7 @@ class Args(BaseModel):
         parser.add_argument("--do_validation", type=lambda x: x.lower() == 'true', default=False)
         parser.add_argument("--validation_steps", type=int, default=None)
         parser.add_argument("--gen_fps", type=int, default=15)
+        parser.add_argument("--validation_only", action="store_true", default=False)
         
         # Loss weight
         parser.add_argument("--loss_warp", type=float, default=0.0)
