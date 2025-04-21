@@ -37,6 +37,7 @@ TRAIN_ARGS=(
     --batch_size 1
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
+    --gradient_checkpointing
 )
 
 # System Configuration
@@ -60,12 +61,8 @@ VALIDATION_ARGS=(
 
 # Combine all arguments and launch training
 accelerate launch \
-    --config_file accelerate_config_base.yaml \
-    --num_machines 2 \
-    --machine_rank $NODE_RANK \
-    --main_process_ip $MASTER_ADDR \
-    --main_process_port $MASTER_PORT \
-    --num_processes 8 train.py  \
+    --num_machines 1 \
+    --num_processes 4 train.py  \
     "${MODEL_ARGS[@]}" \
     "${OUTPUT_ARGS[@]}" \
     "${DATA_ARGS[@]}" \
