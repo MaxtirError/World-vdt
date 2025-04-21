@@ -34,9 +34,10 @@ DATA_ARGS=(
 TRAIN_ARGS=(
     --train_epochs 500 # number of training epochs
     --seed 42 # random seed
-    --batch_size 1
+    --batch_size 4
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
+    --gradient_checkpointing
 )
 
 # System Configuration
