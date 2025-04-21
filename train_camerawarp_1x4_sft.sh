@@ -34,10 +34,9 @@ DATA_ARGS=(
 TRAIN_ARGS=(
     --train_epochs 500 # number of training epochs
     --seed 42 # random seed
-    --batch_size 4
+    --batch_size 2
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
-    --gradient_checkpointing
 )
 
 # System Configuration
@@ -72,4 +71,4 @@ accelerate launch \
     "${CHECKPOINT_ARGS[@]}" \
     "${VALIDATION_ARGS[@]}" \
     --i_log 50 \
-    --i_print 10
+    --i_print 50
