@@ -61,7 +61,6 @@ VALIDATION_ARGS=(
 
 # Combine all arguments and launch training
 accelerate launch \
-    --config_file accelerate_config_base.yaml \
     --num_machines 1 \
     --num_processes 4 train.py  \
     "${MODEL_ARGS[@]}" \
