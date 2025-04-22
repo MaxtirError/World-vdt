@@ -82,7 +82,7 @@ class Trainer:
     def _init_distributed(self):
         logging_dir = Path(self.args.output_dir, "logs")
         project_config = ProjectConfiguration(project_dir=self.args.output_dir, logging_dir=logging_dir)
-        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True, gradient_as_bucket_view=True)
+        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         init_process_group_kwargs = InitProcessGroupKwargs(
             backend="nccl", timeout=timedelta(seconds=self.args.nccl_timeout)
         )
