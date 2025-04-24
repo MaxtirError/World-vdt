@@ -87,7 +87,7 @@ class TartanAirCameraWarpDataset(Dataset):
         return json.load(open(meta_path, "r"))
         
 
-    def __getitem__(self, idx):
+    def _get_video(self, idx):
         '''
         Args:
             idx: index of the instance
@@ -155,6 +155,21 @@ class TartanAirCameraWarpDataset(Dataset):
             "intrinsics": intrinsics,
             "extrinsics": extrinsics,
         }
+    
+    def __getitem__(self, idx):
+        '''
+        Args:
+            idx: index of the instance
+        Returns:
+            data: dictionary of data
+        '''
+        try:
+            data = self._get_video(idx)
+        except Exception as e:
+            print(f'Error loading {self.instances[idx]}: {e}')
+            return self.__getitem__(np.random.randint(len(self.instances)))
+        return data
+    
     
     @staticmethod
     def collate_fn(batch):
