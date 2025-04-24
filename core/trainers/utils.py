@@ -1,6 +1,6 @@
 from typing import Dict, Literal
 
-from .lora_base import Trainer
+from .base import Trainer
 
 
 SUPPORTED_MODELS: Dict[str, Dict[str, Trainer]] = {}
