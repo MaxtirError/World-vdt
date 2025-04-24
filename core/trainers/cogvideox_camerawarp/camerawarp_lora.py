@@ -14,7 +14,7 @@ from transformers import AutoTokenizer, T5EncoderModel
 from typing_extensions import override
 
 from core.schemas import Components
-from core.trainers.lora_base import Trainer
+from core.trainers.base import Trainer
 from core.utils import unwrap_model
 import random
 from core.pipe import CogVideoXI2VCameraWarpPipeline

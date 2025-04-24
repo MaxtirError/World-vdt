@@ -34,7 +34,7 @@ DATA_ARGS=(
 TRAIN_ARGS=(
     --train_epochs 500 # number of training epochs
     --seed 42 # random seed
-    --batch_size 1
+    --batch_size 4
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
     --gradient_checkpointing
@@ -49,18 +49,20 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 500 # save checkpoint every x steps  
+    --checkpointing_steps 2000 # save checkpoint every x steps  
+    --resume_from_checkpoint "/mnt/blob/workspace/TartanAirWarp/0421_sft_4xA100_25x480x720_debug/checkpoint-18000/"
 )
 
 # Validation Configuration
 VALIDATION_ARGS=(
     --do_validation true  # ["true", "false"]
-    --validation_steps 500  # should be multiple of checkpointing_steps
+    --validation_steps 1000  # should be multiple of checkpointing_steps
     --gen_fps 16
 )
 
 # Combine all arguments and launch training
 accelerate launch \
+    --config_file accelerate_config_base.yaml \
     --num_machines 1 \
     --num_processes 4 train.py  \
     "${MODEL_ARGS[@]}" \
