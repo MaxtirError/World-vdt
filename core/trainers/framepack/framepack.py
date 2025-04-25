@@ -1,6 +1,5 @@
 from core.trainers.base import Trainer
 from typing_extensions import override
-from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
 from core.schemas import Components
 from typing import *
 import torch
