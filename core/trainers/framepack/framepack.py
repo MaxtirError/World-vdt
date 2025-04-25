@@ -4,7 +4,17 @@ from core.schemas import Components
 from typing import *
 import torch
 from diffusers import AutoencoderKLHunyuanVideo
+from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
+from core.datasets import NaiveTestDataset
+from core.constants import LOG_LEVEL, LOG_NAME
+from accelerate.logging import get_logger
 
+from core.utils import (
+    free_memory,
+    unload_model,
+)
+
+logger = get_logger(LOG_NAME, LOG_LEVEL)
 class FramePackSFTTrainer(Trainer):
     """Trainer class for FramePack SFT (Supervised Fine-Tuning) training."""
     
@@ -13,30 +23,42 @@ class FramePackSFTTrainer(Trainer):
         components = Components()
         model_path = str(self.args.model_path)
         cache_dir = str(self.args.cache_dir)
-        vae = AutoencoderKLHunyuanVideo.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='vae', cache_dir=cache_dir)
-        transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained('lllyasviel/FramePackI2V_HY', cache_dir=cache_dir)
-
-        vae_scale_factor_spatial = 2 ** (len(components.vae.config.block_out_channels) - 1)
-        sample_height = self.state.train_height // vae_scale_factor_spatial
-        sample_width = self.state.train_width // vae_scale_factor_spatial
-        if self.args.debug:
-            print(f"sample height: {sample_height}, sample width: {sample_width}")
-        components.backbone = CogVideoXCameraWarpDiffusion(
-            model_path=model_path,
-            cache_dir=cache_dir,
-            warp_num_layers=self.args.warp_num_layers,
-            train_height=self.state.train_height,
-            train_width=self.state.train_width,
-            train_frames=self.state.train_frames,
-            sample_height=sample_height,
-            sample_width=sample_width,
-        )
-        
-        try:
-            components.scheduler = CogVideoXDPMScheduler.from_pretrained(model_path, subfolder="scheduler", cache_dir=cache_dir)
-        except:
-            components.scheduler = CogVideoXDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
-
+        transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained(model_path, cache_dir=cache_dir)
         return components
 
-        
+    @override
+    def prepare_dataset(self) -> None:
+        logger.info("Initializing dataset and dataloader")
+
+        if self.args.model_type == "framepack":
+            self.dataset = NaiveTestDataset(
+                num_frames=self.state.train_frames,
+                height=self.state.train_height,
+                width=self.state.train_width,
+            )
+        else:
+            raise ValueError(f"Invalid model type: {self.args.model_type}")
+
+        # Prepare VAE and text encoder for encoding
+        self.components.vae.requires_grad_(False)
+        self.components.text_encoder.requires_grad_(False)
+        self.components.vae = self.components.vae.to(self.accelerator.device, dtype=self.state.weight_dtype)
+        self.components.text_encoder = self.components.text_encoder.to(
+            self.accelerator.device, dtype=self.state.weight_dtype
+        )
+        if self.args.model_type == "camerawarp":
+            # precompute prompt embedding
+            self.prompt_embedding = self.encode_text("")
+
+        unload_model(self.components.vae)
+        unload_model(self.components.text_encoder)
+        free_memory()
+
+        self.data_loader = torch.utils.data.DataLoader(
+            self.dataset,
+            collate_fn=self.dataset.collate_fn,
+            batch_size=self.args.batch_size,
+            num_workers=self.args.num_workers,
+            pin_memory=self.args.pin_memory,
+            shuffle=True,
+        )

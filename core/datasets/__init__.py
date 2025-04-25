@@ -1,1 +1,1 @@
-from .tartanair_camerawarp import TartanAirCameraWarpDataset
+from .tartanair_camerawarp import TartanAirCameraWarpDataset, NaiveTestDataset

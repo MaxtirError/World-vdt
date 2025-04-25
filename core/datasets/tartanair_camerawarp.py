@@ -174,3 +174,68 @@ class TartanAirCameraWarpDataset(Dataset):
     @staticmethod
     def collate_fn(batch):
         return {k : torch.stack([d[k] for d in batch]) for k in batch[0].keys()}
+    
+
+
+class NaiveTestDataset(Dataset):
+    def __init__(self,
+        num_frames : int,
+        height : int,
+        width : int,
+        length : int = 1000,):
+        '''
+        This class loads TartanAir dataset for camera warp task.
+        dataset structure:
+        root
+        ├── .index.txt
+        ├── instance_path
+        │   ├── frames.mp4
+        │   ├── meta.json
+        |   ├── warp_frames.mp4
+        |   ├── mask.npy
+        |   ├── latent.pt (optional)
+        |   ├── ...
+        Args:
+            root: path to the dataset
+            num_frames: number of frames to load
+            height: height of the images
+            width: width of the images
+            use_precompute_vae_latent: whether to use precomputed VAE latent
+            
+        '''
+        self.num_frames = num_frames
+        self.height = height
+        self.width = width
+        self.length = length
+
+    def __len__(self):
+        return self.length
+
+    def _get_video(self, idx):
+        '''
+        Args:
+            idx: index of the instance
+        Returns:
+            frames: (num_frames, H, W, 3) tensor of images
+        '''
+        frames = torch.rand(self.num_frames, 3, self.height, self.width)
+        return {"frames" : frames}
+    
+    def __getitem__(self, idx):
+        '''
+        Args:
+            idx: index of the instance
+        Returns:
+            data: dictionary of data
+        '''
+        try:
+            data = self._get_video(idx)
+        except Exception as e:
+            print(f'Error loading {self.instances[idx]}: {e}')
+            return self.__getitem__(np.random.randint(len(self.instances)))
+        return data
+    
+    
+    @staticmethod
+    def collate_fn(batch):
+        return {k : torch.stack([d[k] for d in batch]) for k in batch[0].keys()}

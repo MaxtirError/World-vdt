@@ -27,7 +27,7 @@ from torch.utils.data import DataLoader, Dataset
 import numpy as np
 
 from core.constants import LOG_LEVEL, LOG_NAME
-from core.datasets import TartanAirCameraWarpDataset
+from core.datasets import TartanAirCameraWarpDataset, NaiveTestDataset
 from core.schemas import Args, Components, State
 import time
 from core.utils import (
@@ -161,6 +161,12 @@ class Trainer:
                 height=self.state.train_height,
                 width=self.state.train_width,
                 use_precompute_vae_latent=self.args.use_precompute_vae_latent,
+            )
+        elif self.args.model_type == "framepack":
+            self.dataset = NaiveTestDataset(
+                num_frames=self.state.train_frames,
+                height=self.state.train_height,
+                width=self.state.train_width,
             )
         else:
             raise ValueError(f"Invalid model type: {self.args.model_type}")
