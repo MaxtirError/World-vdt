@@ -394,7 +394,7 @@ class Trainer:
         
         if self.args.validation_only:
             logger.info("Validation only mode. Skipping training.")
-            for i in range(10, 20):
+            for i in range(0, 100):
                 self.validate(i)
             return 0
             

@@ -12,7 +12,7 @@ class Args(BaseModel):
     model_path: Path
     cache_dir : Path
     model_name: str
-    model_type: Literal["camerawarp"] = "camerawarp"
+    model_type: Literal["camerawarp", "framepack"] = "camerawarp"
     training_type: Literal["lora", "sft"] = "lora"
 
     ########## Output ##########
@@ -111,8 +111,10 @@ class Args(BaseModel):
             frames, height, width = v
 
             # Check if (frames - 1) is multiple of 8
-            if (frames - 1) % 8 != 0:
-                raise ValueError("Number of frames - 1 must be a multiple of 8")
+            model_type = info.data.get("model_type", "")
+            if model_type == "camerawarp":
+                if (frames - 1) % 8 != 0:
+                    raise ValueError("Number of frames - 1 must be a multiple of 8")
 
             # Check resolution for cogvideox-5b models
             model_name = info.data.get("model_name", "")

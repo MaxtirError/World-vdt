@@ -27,3 +27,7 @@ class Components(BaseModel):
     # Scheduler
     scheduler: Any = None
     
+    # feature extractor
+    feature_extractor: Any = None
+    image_encoder: Any = None
+    

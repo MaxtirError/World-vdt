@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 import numpy as np
 import json
+from transformers import SiglipImageProcessor
 
 class TartanAirCameraWarpDataset(Dataset):
     def __init__(self,
@@ -207,6 +208,7 @@ class NaiveTestDataset(Dataset):
         self.height = height
         self.width = width
         self.length = length
+        self.feature_extractor = SiglipImageProcessor.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='feature_extractor')
 
     def __len__(self):
         return self.length
@@ -218,8 +220,11 @@ class NaiveTestDataset(Dataset):
         Returns:
             frames: (num_frames, H, W, 3) tensor of images
         '''
-        frames = torch.rand(self.num_frames, 3, self.height, self.width)
-        return {"frames" : frames}
+        frames = torch.rand(self.num_frames, 3, self.height, self.width) * 2 - 1.0
+        cond_image_np = (frames[0, ...].permute(1, 2, 0).numpy() + 1.0) * 127.5
+        cond_image_np = np.clip(cond_image_np, 0, 255).astype(np.uint8)
+        preprocessed_image = self.feature_extractor(cond_image_np, return_tensors="pt").pixel_values
+        return {"frames" : frames, "preprocessed_image" : preprocessed_image[0]}
     
     def __getitem__(self, idx):
         '''

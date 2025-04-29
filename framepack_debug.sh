@@ -2,18 +2,17 @@
 
 # Prevent tokenizer parallelism issues
 export TOKENIZERS_PARALLELISM=false
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-OUTPUT_DIR="debugs/validation/lora/step66000"
-DATA_ROOT="/home/t-zelonglv/blob/zelong/data/TartanAir_Warp/"
+OUTPUT_DIR="debugs/framepack"
+DATA_ROOT="./data/"
 
 # Model Configuration
 MODEL_ARGS=(
-    --model_path "THUDM/CogVideoX-5b-I2V"
-    --cache_dir "./cache/hub/"
-    --model_name "cogvideox-camerawarp"
-    --model_type "camerawarp"
-    --training_type "lora"
+    --model_path "hunyuanvideo-community/HunyuanVideo"
+    --cache_dir "./cache/framepack/"
+    --model_name "framepack"
+    --model_type "framepack"
+    --training_type "sft"
 )
 
 # Output Configuration
@@ -25,17 +24,17 @@ OUTPUT_ARGS=(
 # Data Configuration
 DATA_ARGS=(
     --data_root ${DATA_ROOT}
-    --train_resolution "25x480x720"  # (frames x height x width), frames should be 8N+1
-    --use_precompute_vae_latent
+    --train_resolution "27x416x960"  # (frames x height x width), frames should be 8N+1
 )
 
 # Training Configuration
 TRAIN_ARGS=(
     --train_epochs 10 # number of training epochs
-    --seed 2 # random seed
+    --seed 42 # random seed
     --batch_size 1
     --gradient_accumulation_steps 1
     --mixed_precision "bf16"  # ["no", "fp16"] # Only CogVideoX-2B supports fp16 training
+    --gradient_checkpointing
 )
 
 # System Configuration
@@ -47,31 +46,16 @@ SYSTEM_ARGS=(
 
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
-    --checkpointing_steps 10 # save checkpoint every x steps
+    --checkpointing_steps 500 # save checkpoint every x steps
     --checkpointing_limit 2 # maximum number of checkpoints to keep, after which the oldest one is deleted
-    --resume_from_checkpoint "/home/t-zelonglv/blob/zelong/workspace/TartanAirWarp/0424_lora_8x4A100_25x480x720_continue/checkpoint-66000/"
-    --load_checkpoint_only
 )
 
 # Validation Configuration
 VALIDATION_ARGS=(
-    --do_validation true  # ["true", "false"]
-    --validation_steps 10  # should be multiple of checkpointing_steps
+    --do_validation false  # ["true", "false"]
+    --validation_steps 500  # should be multiple of checkpointing_steps
     --gen_fps 16
-    --validation_only
 )
-
-# echo command
-echo "accelerate launch train.py  \
-    ${MODEL_ARGS[@]} \
-    ${OUTPUT_ARGS[@]} \
-    ${DATA_ARGS[@]} \
-    ${TRAIN_ARGS[@]} \
-    ${SYSTEM_ARGS[@]} \
-    ${CHECKPOINT_ARGS[@]} \
-    ${VALIDATION_ARGS[@]} \
-    --i_log 50 \
-    --i_print 50"
 
 # Combine all arguments and launch training
 accelerate launch \
@@ -87,5 +71,4 @@ accelerate launch \
     "${CHECKPOINT_ARGS[@]}" \
     "${VALIDATION_ARGS[@]}" \
     --i_log 50 \
-    --i_print 50 \
-    --debug
+    --i_print 50
