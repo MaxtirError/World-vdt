@@ -1030,3 +1030,18 @@ class HunyuanVideoTransformer3DModelPacked(ModelMixin, ConfigMixin, PeftAdapterM
             return Transformer2DModelOutput(sample=hidden_states)
 
         return hidden_states,
+
+    @classmethod
+    def from_transformer_debug(
+        cls,
+        transformer, 
+        num_layers: int = 10,
+        num_single_layers: int = 20,
+    ):
+        config = transformer.config
+        
+        config["num_layers"] = num_layers
+        config["num_single_layers"] = num_single_layers
+        reduced_model = cls(**config)
+        reduced_model.load_state_dict(transformer.state_dict(), strict=False)
+        return reduced_model

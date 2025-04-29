@@ -29,7 +29,8 @@ class FramePackSFTTrainer(Trainer):
         components = Components()
         model_path = str(self.args.model_path)
         cache_dir = str(self.args.cache_dir)
-        components.backbone = HunyuanVideoTransformer3DModelPacked.from_pretrained("lllyasviel/FramePackI2V_HY", cache_dir=cache_dir)
+        transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained("lllyasviel/FramePackI2V_HY", cache_dir=cache_dir)
+        components.backbone = HunyuanVideoTransformer3DModelPacked.from_transformer_debug(transformer)
         
         components.text_encoder = LlamaModel.from_pretrained(model_path, subfolder='text_encoder', torch_dtype=torch.float16).cpu()
         components.text_encoder_2 = CLIPTextModel.from_pretrained(model_path, subfolder='text_encoder_2', torch_dtype=torch.float16).cpu()
