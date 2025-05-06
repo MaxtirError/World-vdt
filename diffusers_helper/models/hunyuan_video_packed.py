@@ -1036,8 +1036,8 @@ class HunyuanVideoTransformer3DModelPacked(ModelMixin, ConfigMixin, PeftAdapterM
     def from_transformer_debug(
         cls,
         transformer, 
-        num_layers: int = 10,
-        num_single_layers: int = 20,
+        num_layers: int = 20,
+        num_single_layers: int = 40,
     ):
         config = transformer.config
         
