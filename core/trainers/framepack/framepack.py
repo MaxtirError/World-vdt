@@ -197,7 +197,7 @@ class FramePackSFTTrainer(Trainer):
         clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
         clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, :1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
         clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
-        x = torch.randn((self.args.batch_size, 16, 9, height // 8, width // 8), device=self.accelerator.device, dtype=weight_dtype)
+        x = torch.randn((self.args.batch_size, 16, latent_window_size, height // 8, width // 8), device=self.accelerator.device, dtype=weight_dtype)
         t = torch.tensor([1.0] * self.args.batch_size, device=self.accelerator.device, dtype=weight_dtype)
         batch_size = x.shape[0]
         distilled_guidance_scale = 10.0

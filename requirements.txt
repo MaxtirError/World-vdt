@@ -20,4 +20,5 @@ pandas
 psutil
 matplotlib
 click
+flash-attn
 git+https://github.com/EasternJournalist/utils3d.git
