@@ -185,27 +185,28 @@ class FramePackSFTTrainer(Trainer):
         image_encoder_last_hidden_state = self.components.image_encoder(batch['preprocessed_image'].to(device=self.accelerator.device, dtype=weight_dtype)).last_hidden_state
         height = self.state.train_height
         width = self.state.train_width
-        history_latents = torch.zeros(size=(1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32).to(device=self.accelerator.device, dtype=weight_dtype)
+        history_latents = torch.zeros(size=(self.args.batch_size, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32).to(device=self.accelerator.device, dtype=weight_dtype)
 
-        latent_window_size = 9
+        latent_window_size = 1
         latent_padding = 2
         latent_padding_size = latent_padding * latent_window_size
 
         clean_latents_pre = start_latent.to(history_latents)
-        indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0)
+        indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0).repeat(self.args.batch_size, 1)
         clean_latent_indices_pre, blank_indices, latent_indices, clean_latent_indices_post, clean_latent_2x_indices, clean_latent_4x_indices = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
         clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
         clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, :1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
         clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
-        x = torch.randn((1, 16, 9, height // 8, width // 8), device=self.accelerator.device, dtype=weight_dtype)
-        t = torch.tensor([1.0], device=self.accelerator.device, dtype=weight_dtype)
+        x = torch.randn((self.args.batch_size, 16, 9, height // 8, width // 8), device=self.accelerator.device, dtype=weight_dtype)
+        t = torch.tensor([1.0] * self.args.batch_size, device=self.accelerator.device, dtype=weight_dtype)
         batch_size = x.shape[0]
         distilled_guidance_scale = 10.0
         distilled_guidance = torch.tensor([distilled_guidance_scale * 1000.0] * batch_size)
+
         model_kwargs = {
-            "pooled_projections": self.clip_l_pooler.to(device=self.accelerator.device, dtype=weight_dtype),
-            "encoder_hidden_states": self.llama_vec.to(device=self.accelerator.device, dtype=weight_dtype),
-            "encoder_attention_mask": self.llama_attention_mask,
+            "pooled_projections": self.clip_l_pooler.to(device=self.accelerator.device, dtype=weight_dtype).repeat(batch_size, 1),
+            "encoder_hidden_states": self.llama_vec.to(device=self.accelerator.device, dtype=weight_dtype).repeat(batch_size, 1, 1),
+            "encoder_attention_mask": self.llama_attention_mask.repeat(batch_size, 1),
             "image_embeddings": image_encoder_last_hidden_state,
             "latent_indices": latent_indices,
             "clean_latents": clean_latents,

@@ -132,7 +132,8 @@ def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seq
         x = flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv)
     else:
         raise NotImplementedError('No Attn Installed!')
-    x = x.view(batch_size, max_seqlen_q, *x.shape[2:])
+    # print(x.shape)
+    x = x.view(batch_size, max_seqlen_q, *x.shape[1:])
     return x
 
 
@@ -1035,8 +1036,8 @@ class HunyuanVideoTransformer3DModelPacked(ModelMixin, ConfigMixin, PeftAdapterM
     def from_transformer_debug(
         cls,
         transformer, 
-        num_layers: int = 10,
-        num_single_layers: int = 20,
+        num_layers: int = 20,
+        num_single_layers: int = 40,
     ):
         config = transformer.config
         

@@ -4,13 +4,13 @@
 export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-OUTPUT_DIR="debugs/framepack"
+OUTPUT_DIR=$1
 DATA_ROOT="./data/"
-
+CACHE_DIR=$2
 # Model Configuration
 MODEL_ARGS=(
     --model_path "hunyuanvideo-community/HunyuanVideo"
-    --cache_dir "./cache/framepack/"
+    --cache_dir "$CACHE_DIR"
     --model_name "framepack"
     --model_type "framepack"
     --training_type "sft"
@@ -73,4 +73,4 @@ accelerate launch \
     "${CHECKPOINT_ARGS[@]}" \
     "${VALIDATION_ARGS[@]}" \
     --i_log 50 \
-    --i_print 50
+    --i_print 10
