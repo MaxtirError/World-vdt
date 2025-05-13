@@ -51,7 +51,7 @@ def _load_video(video_path):
 @click.command()
 @click.argument("root", type=click.Path(exists=True))
 @click.option("--num_threads", type=int, default=8, help="Number of threads to use for data loading and processing")
-@click.option("--rank", type=int, default=0, help="Rank of the current process")
+@click.option("--local_rank", type=int, default=0, help="Rank of the current process")
 @click.option("--world_size", type=int, default=1, help="Total number of processes")
 @click.option("--debug", is_flag=True, default=False, help="Enable debug mode")
 def main(root: str, num_threads: int, rank : int, world_size : int, debug: bool):
