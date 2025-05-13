@@ -54,12 +54,12 @@ def _load_video(video_path):
 @click.option("--local_rank", type=int, default=0, help="Rank of the current process")
 @click.option("--world_size", type=int, default=1, help="Total number of processes")
 @click.option("--debug", is_flag=True, default=False, help="Enable debug mode")
-def main(root: str, num_threads: int, rank : int, world_size : int, debug: bool):
+def main(root: str, num_threads: int, local_rank : int, world_size : int, debug: bool):
     np.random.seed(0)
     root = Path(os.path.expanduser(root))
     instances = (root / ".index.txt").read_text().splitlines()
-    start_index = rank * len(instances) // world_size
-    end_index = (rank + 1) * len(instances) // world_size
+    start_index = local_rank * len(instances) // world_size
+    end_index = (local_rank + 1) * len(instances) // world_size
     instances = instances[start_index:end_index]
     print("Total instances:", len(instances))
     vae = AutoencoderKLHunyuanVideo.from_pretrained("hunyuanvideo-community/HunyuanVideo", subfolder='vae', torch_dtype=torch.float16).cpu()
