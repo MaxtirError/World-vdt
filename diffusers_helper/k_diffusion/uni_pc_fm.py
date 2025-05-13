@@ -20,13 +20,6 @@ class FlowMatchUniPC:
         self.extra_args = extra_args
 
     def model_fn(self, x, t):
-        for key, value in self.extra_args['positive'].items():
-            if isinstance(value, torch.Tensor):
-                print(f"key: {key}, value: {value.shape}")
-            else:
-                print(f"key: {key}, value: {value}")
-        print(f"x: {x.shape}")
-        print(f"t: {t}")
         return self.model(x, t, **self.extra_args)
 
     def update_fn(self, x, model_prev_list, t_prev_list, t, order):

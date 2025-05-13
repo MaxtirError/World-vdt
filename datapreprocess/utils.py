@@ -16,6 +16,8 @@ import numpy as np
 import cv2 
 import time
 from functools import wraps
+import numpy as np
+from sklearn.neighbors import KDTree
 
 def read_image(path: Union[str, os.PathLike, IO]) -> np.ndarray:
     """
@@ -225,3 +227,34 @@ def write_video(path: Union[str, os.PathLike, IO], video: np.ndarray, fps: int =
     for frame in video:
         writer.append_data(frame)
     writer.close()
+    
+
+def greedy_subset_selection_numpy(A, B, k=4):
+    subset = []
+    subset_index = []
+    total_distance = np.inf
+    
+    # 初始点：B质心的最近邻点
+    centroid_B = np.mean(B, axis=0)
+    start_idx = np.argmin(np.linalg.norm(A - centroid_B, axis=1))
+    subset.append(A[start_idx])
+    subset_index.append(start_idx)
+    
+    for _ in range(k-1):
+        min_sum = np.inf
+        best_point = None
+        # 遍历未选点，计算总距离减少量
+        for candidate_index in range(len(A)):
+            if candidate_index in subset_index:
+                continue
+            temp_subset = subset + [A[candidate_index]]
+            tree = KDTree(temp_subset)
+            dist, _ = tree.query(B)
+            current_sum = np.sum(dist)
+            if current_sum < min_sum:
+                min_sum = current_sum
+                best_point = candidate_index
+        subset.append(A[best_point])
+        subset_index.append(best_point)
+        total_distance = min_sum
+    return subset, subset_index

@@ -1,1 +1,2 @@
 from .cogvideox_camera_warp import CogVideoXCameraWarpDiffusion
+from .framepack_camera_warp import FramePackCameraWarpDiffusion

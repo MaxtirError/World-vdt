@@ -3,7 +3,10 @@ from typing_extensions import override
 from core.schemas import Components
 from typing import *
 import torch
-from diffusers import AutoencoderKLHunyuanVideo
+from diffusers import (
+    AutoencoderKLHunyuanVideo,
+    FlowMatchEulerDiscreteScheduler,
+)
 from diffusers_helper.models.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked
 from core.datasets import NaiveTestDataset
 from core.constants import LOG_LEVEL, LOG_NAME
@@ -13,6 +16,9 @@ from transformers import SiglipImageProcessor, SiglipVisionModel
 from diffusers.pipelines.hunyuan_video.pipeline_hunyuan_video import DEFAULT_PROMPT_TEMPLATE
 from diffusers_helper.utils import crop_or_pad_yield_mask
 from core.trainers.utils import register
+from diffusers.training_utils import compute_density_for_timestep_sampling
+from core.backbones import FramePackCameraWarpDiffusion
+
 
 from core.utils import (
     free_memory,
@@ -29,15 +35,20 @@ class FramePackSFTTrainer(Trainer):
         components = Components()
         model_path = str(self.args.model_path)
         cache_dir = str(self.args.cache_dir)
-        transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained("lllyasviel/FramePackI2V_HY", cache_dir=cache_dir)
-        components.backbone = HunyuanVideoTransformer3DModelPacked.from_transformer_debug(transformer)
+        components.backbone = FramePackCameraWarpDiffusion(cache_dir=cache_dir, 
+            branch_num_layers=self.args.branch_num_layers,
+            branch_num_single_layers=self.args.branch_num_single_layers,
+            train_height=self.state.train_height,
+            train_width=self.state.train_width,
+            latent_window_size=self.args.latent_window_size,)
         
-        components.text_encoder = LlamaModel.from_pretrained(model_path, subfolder='text_encoder', torch_dtype=torch.float16).cpu()
-        components.text_encoder_2 = CLIPTextModel.from_pretrained(model_path, subfolder='text_encoder_2', torch_dtype=torch.float16).cpu()
-        components.tokenizer = LlamaTokenizerFast.from_pretrained(model_path, subfolder='tokenizer')
-        components.tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder='tokenizer_2')
-        components.vae = AutoencoderKLHunyuanVideo.from_pretrained(model_path, subfolder='vae', torch_dtype=torch.float16).cpu()
-        components.image_encoder = SiglipVisionModel.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='image_encoder', torch_dtype=torch.float16).cpu()
+        components.text_encoder = LlamaModel.from_pretrained(model_path, subfolder='text_encoder', cache_dir=cache_dir)
+        components.text_encoder_2 = CLIPTextModel.from_pretrained(model_path, subfolder='text_encoder_2', cache_dir=cache_dir)
+        components.tokenizer = LlamaTokenizerFast.from_pretrained(model_path, subfolder='tokenizer', cache_dir=cache_dir)
+        components.tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder='tokenizer_2', cache_dir=cache_dir)
+        components.vae = AutoencoderKLHunyuanVideo.from_pretrained(model_path, subfolder='vae', cache_dir=cache_dir)
+        components.image_encoder = SiglipVisionModel.from_pretrained("lllyasviel/flux_redux_bfl", subfolder='image_encoder', cache_dir=cache_dir)
+        components.scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(model_path, subfolder="scheduler", cache_dir=cache_dir)
 
         return components
     
@@ -176,51 +187,59 @@ class FramePackSFTTrainer(Trainer):
         # model input
         # latent not in the batch
         weight_dtype = self.state.weight_dtype
+        if self.args.use_precompute_vae_latent:
+            latents = batch["latents"].to(device=self.accelerator.device, dtype=self.state.weight_dtype)
+            history_latents = batch["history_latents"].to(device=self.accelerator.device, dtype=self.state.weight_dtype)
+            warp_latents = batch["warp_latents"].to(device=self.accelerator.device, dtype=self.state.weight_dtype)
+        else:
+            latents = self.encode_video(batch["frames"].permute(0, 2, 1, 3, 4))
+            history_latents = self.encode_video(batch["history_frames"].permute(0, 2, 1, 3, 4))
+            warp_latents = self.encode_video(batch["warp_frames"].permute(0, 2, 1, 3, 4))
+
         # image condition
-        images = batch["frames"][:, :1, :, :, :].permute(0, 2, 1, 3, 4)  # [B, C, F, H, W]
+        images = batch["condition_images"]  # [B, C, F, H, W]
         image_noise_sigma = torch.normal(mean=-3.0, std=0.5, size=(images.size(0),), device=self.accelerator.device)
         image_noise_sigma = torch.exp(image_noise_sigma).to(dtype=images.dtype)
         noisy_images = images + torch.randn_like(images) * image_noise_sigma[:, None, None, None, None]
         start_latent = self.encode_video(noisy_images)
-        image_encoder_last_hidden_state = self.components.image_encoder(batch['preprocessed_image'].to(device=self.accelerator.device, dtype=weight_dtype)).last_hidden_state
-        height = self.state.train_height
-        width = self.state.train_width
-        history_latents = torch.zeros(size=(1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32).to(device=self.accelerator.device, dtype=weight_dtype)
+        image_encoder_last_hidden_state = self.components.image_encoder(batch['preprocessed_condition_image'].to(device=self.accelerator.device, dtype=weight_dtype)).last_hidden_state
 
-        latent_window_size = 9
-        latent_padding = 2
-        latent_padding_size = latent_padding * latent_window_size
+        t = compute_density_for_timestep_sampling(
+            weighting_scheme="logit_normal",
+            batch_size=self.args.batch_size,
+            logit_mean=self.args.logit_mean,
+            logit_std=self.args.logit_std
+        )
+        timesteps = t * 1000.0
+        t = t.view(-1, *[1 for _ in range(len(latents.shape) - 1)])
+        noise = torch.randn_like(latents)
+        noisy_latents = (1 - t) * latents + (self.args.sigma_min + (1 - self.args.sigma_min) * t) * noise
 
-        clean_latents_pre = start_latent.to(history_latents)
-        indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0)
-        clean_latent_indices_pre, blank_indices, latent_indices, clean_latent_indices_post, clean_latent_2x_indices, clean_latent_4x_indices = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
-        clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
-        clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, :1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
-        clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
-        x = torch.randn((1, 16, 9, height // 8, width // 8), device=self.accelerator.device, dtype=weight_dtype)
-        t = torch.tensor([1.0], device=self.accelerator.device, dtype=weight_dtype)
-        batch_size = x.shape[0]
-        distilled_guidance_scale = 10.0
-        distilled_guidance = torch.tensor([distilled_guidance_scale * 1000.0] * batch_size)
-        model_kwargs = {
-            "pooled_projections": self.clip_l_pooler.to(device=self.accelerator.device, dtype=weight_dtype),
-            "encoder_hidden_states": self.llama_vec.to(device=self.accelerator.device, dtype=weight_dtype),
-            "encoder_attention_mask": self.llama_attention_mask,
-            "image_embeddings": image_encoder_last_hidden_state,
-            "latent_indices": latent_indices,
-            "clean_latents": clean_latents,
-            "clean_latent_indices": clean_latent_indices,
-            "clean_latents_2x": clean_latents_2x,
-            "clean_latent_2x_indices": clean_latent_2x_indices,
-            "clean_latents_4x": clean_latents_4x,
-            "clean_latent_4x_indices": clean_latent_4x_indices,
-            "guidance": distilled_guidance.to(device=self.accelerator.device, dtype=weight_dtype),
-        }
+        
+        masks = batch["masks"].permute(0, 2, 1, 3, 4)
+        masks = torch.nn.functional.interpolate(
+            masks, 
+            size=(
+                (masks.shape[-3] - 1) // 4 + 1, 
+                self.state.train_height // 8, 
+                self.state.train_width // 8
+            )
+        )
+
         model_predict = self.components.backbone(
-            x, t, **model_kwargs
+            noisy_latents=noisy_latents,
+            timesteps=timesteps,
+            warp_latents=warp_latents,
+            start_latent=start_latent,
+            history_latents=history_latents,
+            warp_masks=masks,
+            pooled_projections=self.clip_l_pooler.to(device=self.accelerator.device, dtype=weight_dtype),
+            encoder_hidden_states=self.llama_vec.to(device=self.accelerator.device, dtype=weight_dtype),
+            encoder_attention_mask=self.llama_attention_mask.to(device=self.accelerator.device, dtype=weight_dtype),
+            image_embedings=image_encoder_last_hidden_state.to(device=self.accelerator.device, dtype=weight_dtype),
         )[0]
         
-        loss = torch.mean((model_predict - x) ** 2)
+        loss = torch.mean((model_predict - latents) ** 2)
         return loss
 
 

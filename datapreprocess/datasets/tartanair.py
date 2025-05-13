@@ -131,3 +131,82 @@ class TartanairLoader:
                 'intrinsics' : intrinsics, 
                 'history_scene' : history_scene, 
                 'video_info': video_info}
+
+
+class TartanairSimpleLoader:
+    '''
+    for constructing a clip video for the conviniance of training
+    '''
+    def __init__(
+        self,
+        root,
+        image_size=128,
+        window_size=160,
+    ):
+        self.root = root
+        if isinstance(image_size, int):
+            image_size = (image_size, image_size)
+        self.image_size = image_size
+        metadata = pd.read_csv(Path(root, 'metadata.csv'))
+        self.instances = [(row['path'], row['num_frames']) for _, row in metadata.iterrows()]
+        # filter out instances with less than frame_size frames
+        print("total valid instances:", len(self.instances))
+        
+        self.window_size = window_size
+    
+    @staticmethod
+    def load_raw_datas(scene_path : Path, frame_list):
+        images = []
+        depths = []
+        extrinsics = []
+        intrinsics = []
+        for frame in frame_list:
+            frame_path = Path(scene_path, f"{frame:06d}_left")
+            image_path = frame_path / 'image.jpg'
+            depth_path = frame_path / 'depth.png'
+            meta_path = frame_path / 'meta.json'
+            image = read_image(image_path)
+            depth, _ = read_depth(depth_path)
+            meta = read_meta(meta_path)
+            images.append(image)
+            depths.append(depth)
+            extrinsics.append(meta['extrinsics'])
+            intrinsics.append(meta['intrinsics'])
+        return {
+            'images': np.stack(images),
+            'depths': np.stack(depths),
+            'extrinsics': np.stack(extrinsics),
+            'intrinsics': np.stack(intrinsics)
+        }
+    
+    def __len__(self):
+        return len(self.instances)
+    
+    def __call__(self, idx, st_window=None):
+        scene_path, num_frames = self.instances[idx]
+        video_info = {"scene_path": scene_path}
+        scene_path = Path(self.root, scene_path)
+        frame_size = self.window_size
+        assert num_frames >= frame_size, f'Instance {scene_path} has less than {frame_size} frames.'
+        if st_window is None:
+            st_window = np.random.randint(num_frames - self.window_size + 1)
+        else:
+            st_window = min(st_window, num_frames - self.window_size)
+        frame_list = list(range(st_window, st_window + frame_size))
+        video_info['frame_list'] = frame_list
+        raw_data = self.load_raw_datas(scene_path, frame_list)
+        
+        images = torch.tensor(raw_data['images'], dtype=torch.float32).permute(0, 3, 1, 2).float() / 255.0
+        depths = torch.tensor(raw_data['depths'], dtype=torch.float32).unsqueeze(1)
+        extrinsics_raw = torch.tensor(raw_data['extrinsics'], dtype=torch.float32)
+        intrinsics_raw = torch.tensor(raw_data['intrinsics'], dtype=torch.float32)
+        # print(images.dtype, depths.dtype, extrinsics.dtype, intrinsics.dtype)
+        images, intrinsics_raw, depths = crop_images(images, self.image_size, mode='random', intrinsics=intrinsics_raw, depth=depths)
+        
+        return {
+            'images': images,
+            'depths': depths.squeeze(1),
+            'extrinsics' : extrinsics_raw,
+            'intrinsics' : intrinsics_raw,
+            'video_info': video_info
+        }
