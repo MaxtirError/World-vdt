@@ -258,3 +258,37 @@ def greedy_subset_selection_numpy(A, B, k=4):
         subset_index.append(best_point)
         total_distance = min_sum
     return subset, subset_index
+
+
+@torch.no_grad()
+def vae_decode(latents, vae, image_mode=False):
+    latents = latents / vae.config.scaling_factor
+
+    if not image_mode:
+        image = vae.decode(latents.to(device=vae.device, dtype=vae.dtype)).sample
+    else:
+        latents = latents.to(device=vae.device, dtype=vae.dtype).unbind(2)
+        image = [vae.decode(l.unsqueeze(2)).sample for l in latents]
+        image = torch.cat(image, dim=2)
+
+    return image
+
+
+@torch.no_grad()
+def vae_encode(image, vae):
+    latents = vae.encode(image.to(device=vae.device, dtype=vae.dtype)).latent_dist.sample()
+    latents = latents * vae.config.scaling_factor
+    return latents
+
+def load_video(video_path):
+    '''
+    Args:
+        video_path: path to the video
+    Returns:
+        video: (num_frames, 3, H, W) tensor of images
+    '''
+    video = imageio.get_reader(str(video_path))
+    # get the first num_frames frames
+    video = [frame for frame in video.iter_data()]
+    video = torch.tensor(np.array(video)).permute(0, 3, 1, 2) / 255.0 * 2 - 1.0
+    return video.float()

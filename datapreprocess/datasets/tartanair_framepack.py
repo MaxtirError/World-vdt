@@ -15,7 +15,7 @@ class TartanairFramePackLoader:
         self,
         root,
         latent_window_size=4,
-        max_section_latent_window_size=40,
+        max_section_latent_window_size=39,
         max_num_warp_cache=4,
         max_num_history_latent=16+2+1,
         image_size=(480, 832),
@@ -83,11 +83,11 @@ class TartanairFramePackLoader:
         # save the figure
         plt.savefig('debugs/vis_camera_trajectory.png')
     
-    def sparse_sample_history(self, num_history):
+    def sparse_sample_history(self, history_list):
         # log sample frames
         # get log2 of num_history
-        log_num_history = int(np.log2(num_history))
-        return [num_history - 2 ** i for i in range(log_num_history + 1)]
+        log_num_history = int(np.log2(len(history_list)))
+        return [history_list[-2**i] for i in range(log_num_history + 1)]
         
     @staticmethod
     def load_raw_datas(scene_path : Path, frame_list):
@@ -144,60 +144,57 @@ class TartanairFramePackLoader:
         # if the real_num_history_frames <= max_num_history_frames, then the frame list is st_window and its following total_frame_size frames
         # else we only hold the st_frames, ..., max_num_history_frames, latent_window_size
         end_window = st_window + total_frame_size
-        start_generate = end_window - self.latent_window_size * 4
-        start_history = max(st_window + 1, start_generate - self.max_num_history_frames)
-        
-        frame_list_to_load = [st_window] + list(range(start_history, start_generate)) + list(range(start_generate, end_window))
-        video_info['frame_list'] = frame_list_to_load
-        num_history = len(frame_list_to_load) - self.latent_window_size * 4
+        num_generate = self.latent_window_size * 4
+        video_info['start_window'] = st_window
+        video_info['end_window'] = end_window
+        video_info['num_generate'] = num_generate
+
+        frame_list_to_load = list(range(st_window, end_window))
         raw_data = self.load_raw_datas(scene_path, frame_list_to_load)
         # first resize to target size
         images = torch.tensor(raw_data['images'], dtype=torch.float32).permute(0, 3, 1, 2).float() / 255.0
         depths = torch.tensor(raw_data['depths'], dtype=torch.float32).unsqueeze(1)
         extrinsics_raw = torch.tensor(raw_data['extrinsics'], dtype=torch.float32)
         intrinsics_raw = torch.tensor(raw_data['intrinsics'], dtype=torch.float32)
+
         images, intrinsics_raw, depths = crop_images(images, self.image_size, mode='random', intrinsics=intrinsics_raw, depth=depths)
         depths = depths.squeeze(1)
         depth_mask = torch.isfinite(depths)
         mask = depth_mask & (depths < depths[depth_mask].min() * self.max_depth_range)
         # get the raw point cloud in camera space
-        pcs_world_raw = utils3d.torch.depth_to_points(depths[num_history:], intrinsics_raw[num_history:], extrinsics_raw[num_history:])
+        pcs_world_raw = utils3d.torch.depth_to_points(depths[-num_generate:], intrinsics_raw[-num_generate:], extrinsics_raw[-num_generate:])
         
-        gt_world_raw = pcs_world_raw[mask[num_history:]].reshape(-1, 3)
+        gt_world_raw = pcs_world_raw[mask[-num_generate:]].reshape(-1, 3)
         mean = gt_world_raw.mean(0)
         scale = (gt_world_raw - mean).abs().max()
-        extrinsics_normalized = extrinsics_raw.clone()
+        extrinsics_normalized = extrinsics_raw[-num_generate:].clone()
         extrinsics_normalized = normalize_extrinsics(extrinsics_normalized, scale, mean)
         inv_extrinsics = torch.inverse(extrinsics_normalized[0])
         extrinsics_normalized = extrinsics_normalized @ inv_extrinsics
         
-        history_extrinsics = extrinsics_raw[:num_history]
-        generate_extrinsics = extrinsics_raw[num_history:]
         # greedy sample the best history subset
-        history_sample = self.sparse_sample_history(num_history)
+        history_sample = self.sparse_sample_history(list(range(total_frame_size - num_generate)))
         
         # construct history scene
-        history_images = images[:num_history][history_sample]
-        history_depth = depths[:num_history][history_sample]
-        history_extrinsics = extrinsics_raw[:num_history][history_sample]
-        history_intrinsics = intrinsics_raw[:num_history][history_sample]
-        history_mask = mask[:num_history][history_sample]
+        history_images = images[history_sample]
+        history_depth = depths[history_sample]
+        history_extrinsics = extrinsics_raw[history_sample]
+        history_intrinsics = intrinsics_raw[history_sample]
+        history_mask = mask[history_sample]
         history_pcs_world = utils3d.torch.depth_to_points(history_depth, history_intrinsics, history_extrinsics)
         history_pcs = history_pcs_world[history_mask].reshape(-1, 3)
         history_rgb = history_images.permute(0, 2, 3, 1)[history_mask]
         
         history_scene = PcScene(
-            xyz=history_pcs, 
-            rgb=history_rgb, 
+            xyz=history_pcs.clone(), 
+            rgb=history_rgb.clone(), 
             scale=scale.item(), 
-            extrinsics=extrinsics_raw[num_history:], 
-            intrinsics=intrinsics_raw[num_history:],
-            history_frames=history_images[:num_history] if self.debug else None)
+            extrinsics=extrinsics_raw[-(num_generate+1):].clone(), 
+            intrinsics=intrinsics_raw[-(num_generate+1):].clone())
          
         
-        return {'frames': images[num_history:], 
+        return {'frames': images, 
                 'extrinsics' : extrinsics_normalized,
-                'intrinsics' : intrinsics_raw[num_history:],
-                'history_frames': images[:num_history], 
+                'intrinsics' : intrinsics_raw[-num_generate:],
                 'history_scene' : history_scene, 
                 'video_info': video_info}

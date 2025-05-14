@@ -9,6 +9,7 @@ from utils import *
 import utils3d
 from pathlib import Path
 from representations.pc_scene import PcScene
+from easydict import EasyDict as edict
 
 class TartanairLoader:
     def __init__(
@@ -210,3 +211,161 @@ class TartanairSimpleLoader:
             'intrinsics' : intrinsics_raw,
             'video_info': video_info
         }
+
+
+class TartanairWarpBatchGenerator:
+    def __init__(
+        self,
+        root,
+        raw_subfolder = "raw",
+        latent_subfolder = "frame_latents",
+        warp_subfolder = "warp_batchs",
+        clip_window_size=39,
+        latent_window_size=9,
+        max_num_history_latent=16+2+1,
+        max_depth_range=128,
+        debug=False,
+        use_mask=False,
+        start_section_ratio=0.4,
+    ):
+        self.root = Path(root)
+        self.raw_subfolder = raw_subfolder
+        self.latent_subfolder = latent_subfolder
+        self.warp_subfolder = warp_subfolder
+        self.instances = (root / ".index.txt").read_text().splitlines()
+        # filter out instances with less than frame_size frames
+        print("total valid instances:", len(self.instances))
+        
+        self.max_depth_range = max_depth_range
+        
+        self.debug = debug
+        self.use_mask = use_mask
+
+        self.start_section_ratio = start_section_ratio
+        self.clip_window_size = clip_window_size
+        self.max_num_history_latent = max_num_history_latent
+        self.latent_window_size = latent_window_size
+    
+    def greedy_sample_history(self, history_extrinsics, generate_extrinsics):
+        
+        history_origin = self.get_camera_orgin_from_extrinsics(history_extrinsics)
+        generate_origin = self.get_camera_orgin_from_extrinsics(generate_extrinsics)
+
+        # calculate the distance between the camera origin of the history frames and the generate frame
+        history_origin_numpy = history_origin.cpu().numpy()
+        generate_origin_numpy = generate_origin.cpu().numpy()
+        # greedy sample the best history subset
+        subset_size = min(self.max_num_warp_cache, len(history_origin_numpy))
+        _, history_sample = greedy_subset_selection_numpy(history_origin_numpy, generate_origin_numpy, k=subset_size)
+        return history_sample
+    
+    def sparse_sample_history(self, history_list):
+        # log sample frames
+        # get log2 of num_history
+        log_num_history = int(np.log2(len(history_list)))
+        return [history_list[-2 ** i] for i in range(log_num_history + 1)]
+        
+    def load_raw_datas(self, scene_path : str):
+        raw_scene_path = Path(self.root, self.raw_subfolder, scene_path)
+        latent_scene_path = Path(self.root, self.latent_subfolder, scene_path)
+        clip_frames = load_video(raw_scene_path / "frames.mp4")
+        depths = torch.load(raw_scene_path / "depths.pt")
+        clip_latents = torch.load(latent_scene_path / "latents.pt")
+        meta = read_meta(raw_scene_path / "meta.json")
+        extrinsics = torch.tensor(meta['extrinsics'], dtype=torch.float32)
+        intrinsics = torch.tensor(meta['intrinsics'], dtype=torch.float32)
+        return edict({
+            "frames": clip_frames,
+            "depths": depths,
+            "latents": clip_latents,
+            "extrinsics": extrinsics,
+            "intrinsics": intrinsics
+        })
+
+    def __len__(self):
+        return len(self.instances)
+    
+    def fetch_clip_data(self, idx):
+        scene_path = self.instances[idx]
+        video_info = {"scene_path": scene_path}
+        clip_data =  self.load_raw_datas(scene_path)
+        clip_data['video_info'] = video_info
+        return clip_data
+
+    def lift_depth_to_points(self, depths, extrinsics, intrinsics, frames=None):
+        depth_mask = torch.isfinite(depths)
+        mask = depth_mask & (depths < depths[depth_mask].min() * self.max_depth_range)
+        # get the raw point cloud in camera space
+        pcs_world_raw = utils3d.torch.depth_to_points(depths, intrinsics, extrinsics)
+        pcs = pcs_world_raw[mask].reshape(-1, 3)
+        if frames is not None:
+            rgb = frames.permute(0, 2, 3, 1)[mask]
+        else:
+            rgb = None
+        return pcs, rgb
+    
+    def generate_from_clip_data(self, clip_data, st_latent=None, section_size=None):
+        # else random history_latent
+        if section_size is None:
+            if np.random.rand() < self.start_section_ratio:
+                section_size = 1 + self.latent_window_size
+            else:
+                section_size = np.random.randint(1 + self.latent_window_size, self.clip_window_size + 1)
+
+        if st_latent is None:
+            st_latent = np.random.randint(self.clip_window_size - section_size + 1)
+        else:
+            st_latent = min(st_latent, self.clip_window_size - section_size)
+        section_latents = clip_data.latents[:, st_latent:st_latent + section_size]
+        generate_latents = section_latents[:, -self.latent_window_size:]
+        history_latents = section_latents[:, 1:-self.latent_window_size]
+        if len(history_latents) > self.max_num_history_latent:
+            history_latents = history_latents[:, -self.max_num_history_latent:]
+        print("section_size", section_size)
+        print("history_latents", history_latents.shape)
+        print("generate_latents", generate_latents.shape)
+        
+        st_window = st_latent * 4
+        end_window = st_window + section_size * 4 - 3
+        start_generate = end_window - self.latent_window_size * 4
+        start_history = max(st_window + 1, start_generate - self.max_num_history_latent * 4)
+        
+        # generate_frames = clip_data.frames[start_generate:end_window]
+        generate_depth = clip_data.depths[start_generate:end_window]
+        generate_extrinsics = clip_data.extrinsics[start_generate:end_window]
+        generate_intrinsics = clip_data.intrinsics[start_generate:end_window]
+        gen_world_raw, _ = self.lift_depth_to_points(generate_depth, generate_extrinsics, generate_intrinsics)
+
+        mean = gen_world_raw.mean(0)
+        scale = (gen_world_raw - mean).abs().max()
+        extrinsics_normalized = generate_extrinsics.clone()
+        extrinsics_normalized = normalize_extrinsics(extrinsics_normalized, scale, mean)
+        inv_extrinsics = torch.inverse(extrinsics_normalized[0])
+        extrinsics_normalized = extrinsics_normalized @ inv_extrinsics
+        
+        history_list = [st_window] + list(range(start_history, start_generate))
+        # greedy sample the best history subset
+        history_sample = self.sparse_sample_history(history_list)
+        # construct history scene
+        history_images = (clip_data.frames[history_sample] + 1) / 2.0
+        history_depth = clip_data.depths[history_sample]
+        history_extrinsics = clip_data.extrinsics[history_sample]
+        history_intrinsics = clip_data.intrinsics[history_sample]
+        history_pcs, history_rgb = self.lift_depth_to_points(history_depth, history_extrinsics, history_intrinsics, frames=history_images)
+        
+        history_scene = PcScene(
+            xyz=history_pcs.clone(), 
+            rgb=history_rgb.clone(), 
+            scale=scale.item(), 
+            extrinsics=clip_data.extrinsics[start_generate-1:end_window].clone(), 
+            intrinsics=clip_data.intrinsics[start_generate-1:end_window].clone(),
+            history_frames=history_images if self.debug else None)
+         
+        
+        return {'start_image': clip_data.frames[st_window:st_window + 1],
+                "history_latents": history_latents,
+                "frame_latents": generate_latents,
+                'extrinsics' : extrinsics_normalized,
+                'intrinsics' : generate_intrinsics, 
+                'history_scene' : history_scene,
+                'video_info': clip_data.video_info,}
