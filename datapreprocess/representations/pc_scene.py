@@ -59,8 +59,8 @@ class PcScene:
             self.xyz.to(device),
             self.rgb.to(device),
             self.scale,
-            self.extrinsics,
-            self.intrinsics
+            self.extrinsics.to(device),
+            self.intrinsics.to(device)
         )
     
     @staticmethod
