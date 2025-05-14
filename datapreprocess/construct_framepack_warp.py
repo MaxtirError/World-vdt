@@ -91,6 +91,9 @@ def main(root: str, output_path : str, num_threads: int, debug: bool, local_rank
         # save latents
         torch.save(data['section_latents'], save_dir / "section_latents.pt")
         torch.save(data['warp_latents'], save_dir / "warp_latents.pt")
+        start_image = (data['frames'][0].permute(1, 2, 0) * 255).clamp(0, 255).numpy().astype(np.uint8)
+        start_image = start_image
+        imageio.imwrite(save_dir / "start_image.png", start_image)
         if debug:
             print(data['section_latents'].shape)
             print(data['warp_latents'].shape)

@@ -178,7 +178,7 @@ class GaussianRenderer:
 
         view = extrinsics
         perspective = intrinsics_to_projection(intrinsics, near, far)
-        camera = torch.inverse(view)[:3, 3]
+        camera = torch.inverse(view.cpu())[:3, 3].to(device=intrinsics.device)
         focalx = intrinsics[0, 0]
         focaly = intrinsics[1, 1]
         fovx = 2 * torch.atan(0.5 / focalx)
