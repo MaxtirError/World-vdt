@@ -370,7 +370,11 @@ class TartanAirFramePackDataset(Dataset):
         return return_dict
 
     def __getitem__(self, index):
-        return self._load_batch_data(index)        
+        try :
+            return self._load_batch_data(index)
+        except Exception as e:
+            print(f'Error loading {self.instances[index]}: {e}')
+            return self.__getitem__(np.random.randint(len(self.instances)))
 
     def collate_fn(self, batch):
         # align the history latent size
