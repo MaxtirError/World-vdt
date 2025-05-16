@@ -83,8 +83,11 @@ class Args(BaseModel):
     gen_fps: int = 15
     validation_only: bool = False
     
-    ########## Loss weight ##########
+    ########## Loss weight and schedule ##########
     loss_warp: float = 0.0
+    logit_mean: float = 0.0
+    logit_std: float = 1.0
+    sigma_min: float = 1e-5
     
     ########## Warp Encoder ##########
     warp_num_layers: int = 2
@@ -92,6 +95,8 @@ class Args(BaseModel):
     ########## Transformer parameters ##########
     noised_image_dropout: float = 0.1
     camera_condition_dropout: float = 0.1
+    branch_num_layers: int = 2
+    branch_num_single_layers: int = 2
     
     ########## Logging ############
     i_log: int = 10
@@ -190,6 +195,8 @@ class Args(BaseModel):
         parser.add_argument("--nccl_timeout", type=int, default=1800)
         parser.add_argument("--debug", action="store_true", default=False)
         parser.add_argument("--gradient_checkpointing", action="store_true", default=False)
+        parser.add_argument("--branch_num_layers", type=int, default=2)
+        parser.add_argument("--branch_num_single_layers", type=int, default=2)
 
         # LoRA parameters
         parser.add_argument("--rank", type=int, default=128)
@@ -210,6 +217,9 @@ class Args(BaseModel):
         
         # Loss weight
         parser.add_argument("--loss_warp", type=float, default=0.0)
+        parser.add_argument("--logit_mean", type=float, default=0.0)
+        parser.add_argument("--logit_std", type=float, default=1.0)
+        parser.add_argument("--sigma_min", type=float, default=1e-5)
         
         # Warp Encoder
         parser.add_argument("--warp_num_layers", type=int, default=2)

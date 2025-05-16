@@ -53,7 +53,8 @@ class CameraEncoder3D(ModelMixin, ConfigMixin):
             resolution : Tuple[int, int],
             pos_emb_dim : int = 144, 
             hidden_channel : int = 288, 
-            out_channel : int =3072):
+            out_channel : int =3072,
+            use_padding : bool = True):
         super().__init__()
         self.resolution = resolution
         self.pos_encoding = AbsolutePositionEmbedder(pos_emb_dim, 6)
@@ -62,7 +63,7 @@ class CameraEncoder3D(ModelMixin, ConfigMixin):
             out_channels=hidden_channel,
             kernel_size=(4,8,8),
             stride=(4,8,8),
-            padding=(2,0,0))
+            padding=(2,0,0) if use_padding else 0)
         
         self.bn3d = nn.BatchNorm3d(hidden_channel)
         self.act3d = nn.GELU()

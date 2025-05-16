@@ -40,6 +40,7 @@ from core.utils import (
     string_to_filename,
     unload_model,
     unwrap_model,
+    write_video
 )
 from core.utils.general_utils import *
 from core.utils.debug_utils import CUDATimer
@@ -63,6 +64,7 @@ class Trainer:
             train_frames=self.args.train_resolution[0],
             train_height=self.args.train_resolution[1],
             train_width=self.args.train_resolution[2],
+            latent_size=self.args.train_resolution[0] // 4, # only for framepack
         )
 
         self.components: Components = self.load_components()
@@ -345,167 +347,6 @@ class Trainer:
                 f.write(self.args.model_dump_json(indent=4))
                 # json.dump(self.args.model_dump_json(), f, indent=4)
     
-    
-    def test(self) -> None:
-        logger.info("Starting testing")
-
-        memory_statistics = get_memory_statistics()
-        logger.info(f"Memory before training start: {json.dumps(memory_statistics, indent=4)}")
-
-        self.state.total_batch_size_count = (
-            self.args.batch_size * self.accelerator.num_processes * self.args.gradient_accumulation_steps
-        )
-        info = {
-            "trainable parameters": self.state.num_trainable_parameters,
-            "total samples": len(self.dataset),
-            "train epochs": self.args.train_epochs,
-            "train steps": self.args.train_steps,
-            "batches per device": self.args.batch_size,
-            "total batches observed per epoch": len(self.data_loader),
-            "train batch size total count": self.state.total_batch_size_count,
-            "gradient accumulation steps": self.args.gradient_accumulation_steps,
-        }
-        logger.info(f"Training configuration: {json.dumps(info, indent=4)}")
-
-        global_step = 0
-        first_epoch = 0
-        initial_global_step = 0
-        accelerator = self.accelerator
-        generator = torch.Generator(device=accelerator.device)
-        if self.args.seed is not None:
-            generator = generator.manual_seed(self.args.seed)
-        self.state.generator = generator
-            
-        if global_step > 0: #or self.args.debug:
-            self.validate(global_step)
-
-        free_memory()
-        for epoch in range(first_epoch, self.args.train_epochs):
-            logger.debug(f"Starting epoch ({epoch + 1}/{self.args.train_epochs})")
-
-            self.components.backbone.train()
-            models_to_accumulate = [self.components.backbone]
-
-            log = []
-            time_last_print = 0.0
-            time_elapsed = 0.0
-            for step, batch in enumerate(self.data_loader):
-                logger.debug(f"Starting step {step + 1}")
-                step_log = {}
-                time_start = time.time()
-                with accelerator.accumulate(models_to_accumulate):
-                    # These weighting schemes use a uniform timestep sampling and instead post-weight the loss
-                    if self.args.debug:
-                        loss = self.compute_loss_debug(batch)
-                    else:
-                        loss = self.compute_loss(batch)
-
-                    if self.args.debug:
-                        # get memory usage before backward
-                        print("memory before backward: ", torch.cuda.memory_allocated() / 1024 / 1024)
-                        with CUDATimer("backward"):
-                            accelerator.backward(loss)
-                    else:
-                        accelerator.backward(loss)
-
-                    if accelerator.sync_gradients:
-                        if accelerator.distributed_type == DistributedType.DEEPSPEED:
-                            grad_norm = self.components.backbone.get_global_grad_norm()
-                            # In some cases the grad norm may not return a float
-                            if torch.is_tensor(grad_norm):
-                                grad_norm = grad_norm.item()
-                        else:
-                            grad_norm = accelerator.clip_grad_norm_(
-                                self.components.backbone.parameters(), self.args.max_grad_norm
-                            )
-                            if torch.is_tensor(grad_norm):
-                                grad_norm = grad_norm.item()
-
-                        step_log["grad_norm"] = grad_norm
-
-                    self.optimizer.step()
-                    self.lr_scheduler.step()
-                    self.optimizer.zero_grad()
-                time_end = time.time()
-                time_elapsed += time_end - time_start
-
-                # Checks if the accelerator has performed an optimization step behind the scenes
-                if accelerator.sync_gradients:
-                    global_step += 1
-                    self.__maybe_save_checkpoint(global_step)
-
-                step_log["loss"] = loss.detach().item()
-                step_log["lr"] = self.lr_scheduler.get_last_lr()[0]
-
-                # Maybe run validation
-                should_run_validation = self.args.do_validation and global_step % self.args.validation_steps == 0
-                if should_run_validation:
-                    del loss
-                    free_memory()
-                    self.validate(global_step)
-                    
-                
-                # Print progress
-                if accelerator.is_main_process and global_step % self.args.i_print == 0:
-                    speed = self.args.i_print / (time_elapsed - time_last_print) * 3600
-                    max_memory_allocated = torch.cuda.max_memory_allocated(accelerator.device)
-                    columns = [
-                        f'Step: {global_step}/{self.args.train_steps} ({global_step / self.args.train_steps * 100:.2f}%)',
-                        f'Elapsed: {time_elapsed / 3600:.2f} h',
-                        f'Speed: {speed:.2f} steps/h',
-                        f'ETA: {(self.args.train_steps - global_step) / speed:.2f} h',
-                        f"Max mem: {max_memory_allocated / 1024 / 1024:.2f} MB",
-                    ]
-                    time_last_print = time_elapsed
-                    description = '| '.join([c.ljust(25) for c in columns])
-                    logger.info(description)
-
-                if accelerator.is_main_process:
-                    log.append((global_step, {}))
-
-                    # Log time
-                    log[-1][1]['time'] = {
-                        'step': time_end - time_start,
-                        'elapsed': time_elapsed,
-                    }
-
-                    # Log losses
-                    if step_log is not None:
-                        log[-1][1].update(step_log)
-
-                if accelerator.is_main_process and global_step % self.args.i_log == 0:
-                    ## save to log file
-                    log_str = '\n'.join([
-                        f'{step}: {json.dumps(log)}' for step, log in log
-                    ])
-                    with open(self.args.output_dir / "logs.txt", "a+") as log_file:
-                        log_file.write(log_str + '\n')
-
-                    # show with mlflow
-                    log_show = [l for _, l in log if not dict_any(l, lambda x: np.isnan(x))]
-                    log_show = dict_reduce(log_show, lambda x: np.mean(x))
-                    log_show = dict_flatten(log_show, sep='/')
-                    accelerator.log(log_show, step=global_step)
-                    log = []
-
-                if global_step >= self.args.train_steps:
-                    break
-
-            memory_statistics = get_memory_statistics()
-            logger.info(f"Memory after epoch {epoch + 1}: {json.dumps(memory_statistics, indent=4)}")
-
-        accelerator.wait_for_everyone()
-        self.__maybe_save_checkpoint(global_step, must_save=True)
-        if self.args.do_validation:
-            free_memory()
-            self.validate(global_step)
-
-        del self.components
-        free_memory()
-        memory_statistics = get_memory_statistics()
-        logger.info(f"Memory after training end: {json.dumps(memory_statistics, indent=4)}")
-
-        accelerator.end_training()
 
 
     def train(self) -> None:
@@ -561,7 +402,7 @@ class Trainer:
                 self.validate(i)
             return 0
             
-        if global_step > 0: #or self.args.debug:
+        if global_step > 0 or self.args.debug:
             self.validate(global_step)
 
         free_memory()
@@ -580,10 +421,10 @@ class Trainer:
                 time_start = time.time()
                 with accelerator.accumulate(models_to_accumulate):
                     # These weighting schemes use a uniform timestep sampling and instead post-weight the loss
-                    if self.args.debug:
-                        loss = self.compute_loss_debug(batch)
-                    else:
-                        loss = self.compute_loss(batch)
+                    # if self.args.debug:
+                    #     loss = self.compute_loss_debug(batch)
+                    # else:
+                    loss = self.compute_loss(batch)
 
                     if self.args.debug:
                         # get memory usage before backward
@@ -749,9 +590,9 @@ class Trainer:
 
                 if artifact_type == "video":
                     logger.debug(f"Saving video to {filename}")
-                    export_to_video(artifact_value, filename, fps=self.args.gen_fps)
-
-        pipe.remove_all_hooks()
+                    # export_to_video(artifact_value, filename, fps=self.args.gen_fps)
+                    write_video(filename, artifact_value, fps=self.args.gen_fps)
+                    
         del pipe
 
         free_memory()
@@ -881,3 +722,8 @@ class Trainer:
                     # save the remaining processes, each node will save its own state
                     os.system(f"cp -r ./cache/temp_state/* {save_path}")
                     os.system("rm -rf ./cache/temp_state/*")
+                if self.args.debug:
+                    # for debug version, quit after saving
+                    logger.info("Debug version, quitting after saving.")
+                    exit(0)
+                    

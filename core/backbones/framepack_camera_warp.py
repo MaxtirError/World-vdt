@@ -15,10 +15,12 @@ from diffusers_helper.models import (
     HunyuanVideoTransformer3DModelBranch, 
     CameraWarpFramePack,
     CameraEncoder3D)
+from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dict
+from diffusers.loaders import HunyuanVideoLoraLoaderMixin
 logger = get_logger(LOG_NAME, LOG_LEVEL)
 
 
-class FramePackCameraWarpDiffusion(ModelMixin):
+class FramePackCameraWarpDiffusion(ModelMixin, HunyuanVideoLoraLoaderMixin):
     def __init__(self,
             cache_dir : str,
             branch_num_layers: int,
@@ -26,20 +28,24 @@ class FramePackCameraWarpDiffusion(ModelMixin):
             train_height: int,
             train_width: int,
             latent_window_size : int = 4,
-            distilled_guidance_scale: float = 10.0,):
+            distilled_guidance_scale: float = 10.0,
+            training_type: str = "sft",):
         super().__init__()
-        pretrained_transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained("lllyasviel/FramePackI2V_HY", cache_dir=cache_dir)
+        assert training_type in ["sft", "lora"], f"training_type {training_type} not supported"
+        self.training_type = training_type
+        pretrained_transformer = HunyuanVideoTransformer3DModelPacked.from_pretrained("lllyasviel/FramePack_F1_I2V_HY_20250503", cache_dir=cache_dir)
         self.transformer : CameraWarpFramePack = CameraWarpFramePack.from_transformer(transformer=pretrained_transformer)
         self.branch : HunyuanVideoTransformer3DModelBranch = HunyuanVideoTransformer3DModelBranch.from_transformer(
             transformer=pretrained_transformer,
-            branch_num_layers=branch_num_layers,
-            branch_num_single_layers=branch_num_single_layers,)
+            num_layers=branch_num_layers,
+            num_single_layers=branch_num_single_layers,)
         del pretrained_transformer
         
-        inner_dim = self.transformer.config.num_attention_heads * self.transformer.attention_head_dim
+        inner_dim = self.transformer.config.num_attention_heads * self.transformer.config.attention_head_dim
         self.camera_encoder : CameraEncoder3D = CameraEncoder3D(
             resolution=(train_height, train_width), 
-            out_channel = inner_dim)
+            out_channel = inner_dim,
+            use_padding=False)
         self.distilled_guidance_scale = distilled_guidance_scale
         self.latent_window_size = latent_window_size
         self.train_height = train_height
@@ -49,13 +55,13 @@ class FramePackCameraWarpDiffusion(ModelMixin):
         noisy_latents : torch.Tensor,
         timesteps : torch.Tensor,
         warp_latents : torch.Tensor, 
-        start_latent : torch.Tensor,
+        start_latents : torch.Tensor,
         history_latents : torch.Tensor,
         warp_masks : torch.Tensor,
         pooled_projections : torch.Tensor,
         encoder_hidden_states : torch.Tensor,
         encoder_attention_mask : torch.Tensor,
-        image_embedings : torch.Tensor,
+        image_embeddings : torch.Tensor,
         extrinsics : torch.Tensor = None, 
         intrinsics : torch.Tensor = None,
         camera_hidden_states : torch.Tensor = None,
@@ -74,30 +80,30 @@ class FramePackCameraWarpDiffusion(ModelMixin):
         clean_latent_indices = torch.cat([clean_latent_indices_start, clean_latent_1x_indices], dim=1)
 
         clean_latents_4x, clean_latents_2x, clean_latents_1x = history_latents[:, :, -sum([16, 2, 1]):, :, :].split([16, 2, 1], dim=2)
-        clean_latents = torch.cat([start_latent.to(history_latents), clean_latents_1x], dim=2)
+        clean_latents = torch.cat([start_latents.to(history_latents), clean_latents_1x], dim=2)
 
         batch_size = noisy_latents.shape[0]
-        distilled_guidance = torch.tensor([self.distilled_guidance_scale * 1000.0] * batch_size)
+        distilled_guidance = torch.tensor([self.distilled_guidance_scale * 1000.0] * batch_size).to(noisy_latents)
 
         extra_kwargs = {
             "encoder_hidden_states": encoder_hidden_states,
             "encoder_attention_mask": encoder_attention_mask,
             "pooled_projections": pooled_projections,
             "guidance": distilled_guidance,
-            "image_embeddings": image_embedings,
+            "image_embeddings": image_embeddings,
         }
 
         # logger.info(f"noisy_model_input.shape: {noisy_model_input.shape}; prompt_embeds.shape: {prompt_embeds.shape}")
         branch_transformer_block_samples, branch_single_transformer_block_samples = self.branch(
             hidden_states=noisy_latents, 
             timestep=timesteps,
-            branch_cond=warp_latents, 
-            guidance=distilled_guidance,
+            branch_cond=torch.cat([warp_latents, warp_masks], dim=1),
             latent_indices=latent_indices,
             return_dict=False,
             **extra_kwargs,
         )
-        branch_block_samples = [block_sample.to(dtype=weight_dtype) for block_sample in branch_block_samples]
+        branch_transformer_block_samples = [block_sample.to(dtype=weight_dtype) for block_sample in branch_transformer_block_samples]
+        branch_single_transformer_block_samples = [block_sample.to(dtype=weight_dtype) for block_sample in branch_single_transformer_block_samples]
         model_output = self.transformer(
             hidden_states=noisy_latents, 
             timestep=timesteps, 
@@ -131,9 +137,15 @@ class FramePackCameraWarpDiffusion(ModelMixin):
         save_path = Path(save_path)
         self.branch.save_pretrained(save_path / "branch", subfolder="branch")
         self.camera_encoder.save_pretrained(save_path / "camera_encoder", subfolder="camera_encoder")
-        self.transformer.save_pretrained(save_path / "transformer", subfolder="transformer")
+        if self.training_type == "lora":
+            transformer_lora_layers_to_save = get_peft_model_state_dict(self.transformer)
+            self.save_lora_weights(
+                save_path / "transformer", transformer_lora_layers=transformer_lora_layers_to_save,
+            )
+        else:
+            self.transformer.save_pretrained(save_path / "transformer", subfolder="transformer")
     
-    def from_pretrained(self, load_pah: str):
+    def from_pretrained(self, load_path: str):
         load_path = Path(load_path)
         load_branch = HunyuanVideoTransformer3DModelBranch.from_pretrained(
             load_path / "branch", subfolder="branch"
@@ -143,7 +155,26 @@ class FramePackCameraWarpDiffusion(ModelMixin):
             load_path / "camera_encoder", subfolder="camera_encoder"
         )
         self.camera_encoder.load_state_dict(camera_encoder.state_dict())
-        transformer = CameraWarpFramePack.from_pretrained(
-            load_path / "transformer", subfolder="transformer"
-        )
-        self.transformer.load_state_dict(transformer.state_dict())
+
+        if self.training_type == "lora":
+            lora_state_dict = self.lora_state_dict(load_path / "transformer")
+            transformer_state_dict = {
+                f'{k.replace("transformer.", "")}': v
+                for k, v in lora_state_dict.items()
+                if k.startswith("transformer.")
+            }
+            incompatible_keys = set_peft_model_state_dict(self.transformer, transformer_state_dict, adapter_name="default")
+            if incompatible_keys is not None:
+                    # check only for unexpected keys
+                    unexpected_keys = getattr(incompatible_keys, "unexpected_keys", None)
+                    if unexpected_keys:
+                        logger.warning(
+                            f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
+                            f" {unexpected_keys}. "
+                        )
+
+        else:
+            transformer = CameraWarpFramePack.from_pretrained(
+                load_path / "transformer", subfolder="transformer"
+            )
+            self.transformer.load_state_dict(transformer.state_dict())

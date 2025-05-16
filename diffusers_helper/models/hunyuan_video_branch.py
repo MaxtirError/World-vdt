@@ -112,6 +112,7 @@ class HunyuanVideoTransformer3DModelBranch(ModelMixin, ConfigMixin, PeftAdapterM
     def disable_gradient_checkpointing(self):
         self.use_gradient_checkpointing = False
         print('self.use_gradient_checkpointing = False')
+
     def initialize_patch_embedding(self, another_conv : nn.Conv3d):
         another_weight = another_conv.weight.data
         another_bias = another_conv.bias.data
@@ -133,7 +134,7 @@ class HunyuanVideoTransformer3DModelBranch(ModelMixin, ConfigMixin, PeftAdapterM
             branch_cond,
             latent_indices=None,
     ):
-        latents = torch.cat([latents, branch_cond], dim=-3)
+        latents = torch.cat([latents, branch_cond], dim=1)
         hidden_states = self.gradient_checkpointing_method(self.x_embedder.proj, latents)
         B, C, T, H, W = hidden_states.shape
 
@@ -224,7 +225,7 @@ class HunyuanVideoTransformer3DModelBranch(ModelMixin, ConfigMixin, PeftAdapterM
         single_transformer_block_samples = ()
         
         # branch blocks
-        for block_idx, block_sample, branch_block in enumerate(zip(block_samples, self.branch_blocks)):
+        for block_idx, (block_sample, branch_block) in enumerate(zip(block_samples, self.branch_blocks)):
             block_sample = self.gradient_checkpointing_method(
                 branch_block,
                 block_sample
@@ -251,7 +252,7 @@ class HunyuanVideoTransformer3DModelBranch(ModelMixin, ConfigMixin, PeftAdapterM
         num_single_layers: int = 2,
         load_weights_from_transformer: bool = True,
     ):
-        config = transformer.config
+        config = {**transformer.config}
         
         config["num_layers"] = num_layers
         config["num_single_layers"] = num_single_layers
@@ -267,6 +268,8 @@ class HunyuanVideoTransformer3DModelBranch(ModelMixin, ConfigMixin, PeftAdapterM
             branch.context_embedder.load_state_dict(transformer.context_embedder.state_dict())
             branch.time_text_embed.load_state_dict(transformer.time_text_embed.state_dict())
             branch.rope.load_state_dict(transformer.rope.state_dict())
+            branch.transformer_blocks.load_state_dict(transformer.transformer_blocks.state_dict(), strict=False)
+            branch.single_transformer_blocks.load_state_dict(transformer.single_transformer_blocks.state_dict(), strict=False)
 
         return branch
 

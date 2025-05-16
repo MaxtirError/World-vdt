@@ -1,1 +1,2 @@
 from .pipeline_cogvideox_camerawarp import CogVideoXI2VCameraWarpPipeline
+from .pipeline_framepack_camerawarp import FramePackValidationPipeline

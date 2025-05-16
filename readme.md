@@ -36,3 +36,15 @@ ooled_projections: torch.Size([1, 768])
 05/04/2025 03:23:45 - INFO - trainer - clean_latents_4x: torch.Size([1, 16, 16, 52, 120])
 05/04/2025 03:23:45 - INFO - trainer - clean_latent_4x_indices: torch.Size([1, 16])
 05/04/2025 03:23:45 - INFO - trainer - guidance: torch.Size([1])
+
+frame pack lora
+single gpu
+setting : g1-bs1-gc
+05/16/2025 12:13:07 - INFO - trainer - Step: 40/2577640 (0.00%) | Elapsed: 0.03 h          | Speed: 1206.60 steps/h   | ETA: 2136.25 h           | Max mem: 38124.05 MB 
+setting : g1-bs8-gc
+05/16/2025 12:47:05 - INFO - trainer - Step: 10/644410 (0.00%)  | Elapsed: 0.03 h          | Speed: 305.60 steps/h    | ETA: 2108.67 h           | Max mem: 51998.49 MB 
+setting : g1-bs4-gc
+05/16/2025 12:42:32 - INFO - trainer - Step: 10/322210 (0.00%)  | Elapsed: 0.06 h          | Speed: 154.81 steps/h    | ETA: 2081.23 h           | Max mem: 69150.77 MB   
+
+setting g4-bs1-gc
+05/16/2025 12:50:45 - INFO - trainer - Step: 10/2577640 (0.00%) | Elapsed: 0.02 h          | Speed: 588.33 steps/h    | ETA: 4381.25 h           | Max mem: 42209.24 MB

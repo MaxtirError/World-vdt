@@ -11,6 +11,7 @@ class State(BaseModel):
     train_frames: int
     train_height: int
     train_width: int
+    latent_size : int
 
     transformer_config: Dict[str, Any] = None
 
