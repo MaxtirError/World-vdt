@@ -58,7 +58,7 @@ VALIDATION_ARGS=(
 )
 
 # Combine all arguments and launch training
-accelerate launch 
+accelerate launch \
     --num_machines 8 \
     --machine_rank $NODE_RANK \
     --main_process_ip $MASTER_ADDR \
