@@ -6,11 +6,14 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 OUTPUT_DIR=$1
 DATA_ROOT=$2
 CACHE_DIR=$3
+# copy cache_dir to local
+# create cache dir if it doesn't exist
+cp -r $CACHE_DIR ./cache/
 
 # Model Configuration
 MODEL_ARGS=(
     --model_path "hunyuanvideo-community/HunyuanVideo"
-    --cache_dir "$CACHE_DIR"
+    --cache_dir "./cache/"
     --model_name "framepack"
     --model_type "framepack"
     --training_type "lora"
