@@ -56,7 +56,7 @@ CHECKPOINT_ARGS=(
 
 # Validation Configuration
 VALIDATION_ARGS=(
-    --do_validation false  # ["true", "false"]
+    --do_validation true  # ["true", "false"]
     --validation_steps 1000  # should be multiple of checkpointing_steps
     --gen_fps 16
 )

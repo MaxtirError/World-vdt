@@ -713,15 +713,8 @@ class Trainer:
                 )
                 self.accelerator.save_state("./cache/temp_state/")
                 # for deepspeed
-                # first wait main process to save the state
-                if self.accelerator.is_main_process:
+                if self.accelerator.local_process_index == 0:
                     os.makedirs(save_path, exist_ok=True)
-                    os.system(f"cp -r ./cache/temp_state/* {save_path}")  
-                    # clear cache
-                    os.system("rm -rf ./cache/temp_state/*")
-                self.accelerator.wait_for_everyone()
-                # for deepspeed
-                if not self.accelerator.is_main_process and self.accelerator.local_process_index == 0:
                     # save the remaining processes, each node will save its own state
                     os.system(f"cp -r ./cache/temp_state/* {save_path}")
                     os.system("rm -rf ./cache/temp_state/*")
