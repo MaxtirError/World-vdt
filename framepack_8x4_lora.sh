@@ -51,6 +51,7 @@ SYSTEM_ARGS=(
 # Checkpointing Configuration
 CHECKPOINT_ARGS=(
     --checkpointing_steps 1000 # save checkpoint every x steps
+    --resume_from_checkpoint "/mnt/blob/workspace/TartanAirFramePack/0516_lora_8x4A100_batch64_4x544x704/checkpoint-1000/" # ["latest", "best"]
 )
 
 # Validation Configuration
