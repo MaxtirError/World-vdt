@@ -233,7 +233,7 @@ class FramePackSFTTrainer(Trainer):
             image_embeddings=image_encoder_last_hidden_state.to(device=self.accelerator.device, dtype=weight_dtype),
             extrinsics=batch["extrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
             intrinsics=batch["intrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
-        )[0]
+        )
         target = (1 - self.args.sigma_min) * noise - latents
         loss = F.mse_loss(model_predict, target)
         if self.args.debug:

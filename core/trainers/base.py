@@ -401,8 +401,9 @@ class Trainer:
             for i in range(0, 100):
                 self.validate(i)
             return 0
-            
-        self.validate(global_step)
+        
+        if not self.args.debug:
+            self.validate(global_step)
 
         free_memory()
         for epoch in range(first_epoch, self.args.train_epochs):
