@@ -19,6 +19,7 @@ from diffusers.training_utils import compute_density_for_timestep_sampling
 from core.backbones import FramePackCameraWarpDiffusion
 from core.pipe import FramePackValidationPipeline
 import copy
+import torch.nn.functional as F
 from core.utils import (
     free_memory,
     unload_model,
@@ -233,8 +234,10 @@ class FramePackSFTTrainer(Trainer):
             extrinsics=batch["extrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
             intrinsics=batch["intrinsics"].to(device=self.accelerator.device, dtype=weight_dtype),
         )[0]
-        
-        loss = torch.mean((model_predict - latents) ** 2)
+        target = (1 - self.args.sigma_min) * noise - latents
+        loss = F.mse_loss(model_predict, target)
+        if self.args.debug:
+            print(f"loss: {loss.item()}")
         return loss
     
     @override

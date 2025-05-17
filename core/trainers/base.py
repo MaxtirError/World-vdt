@@ -402,8 +402,7 @@ class Trainer:
                 self.validate(i)
             return 0
             
-        if global_step > 0 or self.args.debug:
-            self.validate(global_step)
+        self.validate(global_step)
 
         free_memory()
         for epoch in range(first_epoch, self.args.train_epochs):
@@ -557,6 +556,9 @@ class Trainer:
                 # Skip current validation on all processes but one
                 if i % accelerator.num_processes != accelerator.process_index:
                     continue
+            
+            if not self.accelerator.is_main_process:
+                continue
 
             logger.debug(
                 f"Validating sample {i + 1}/{num_validation_samples} on process {accelerator.process_index}.",
